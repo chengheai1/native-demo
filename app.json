@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "\u5e8f XU",
+    "slug": "native-demo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/xu-icon.png",
+    "scheme": "nativedemo",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.xu.todo",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.xu.todo",
+      "adaptiveIcon": {
+        "backgroundColor": "#1C1A17",
+        "foregroundImage": "./assets/images/xu-adaptive-foreground.png",
+        "backgroundImage": "./assets/images/xu-adaptive-background.png",
+        "monochromeImage": "./assets/images/xu-adaptive-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/xu-favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F6F1E7",
+          "image": "./assets/images/xu-splash.png",
+          "imageWidth": 108,
+          "dark": {
+            "backgroundColor": "#151412",
+            "image": "./assets/images/xu-splash.png",
+            "imageWidth": 108
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
