@@ -46,7 +46,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "eslint .",
-    "test": "node --test src/lib/format.test.ts",
+    "test": "node --test src/api/*.test.ts src/auth/*.test.ts src/features/todos/*.test.ts src/lib/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "private": true

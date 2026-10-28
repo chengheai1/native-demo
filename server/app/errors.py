@@ -16,8 +16,12 @@ class ApiError(Exception):
         self.message = message
 
 
+def success_body(data: Any) -> dict[str, Any]:
+    return {"code": 200, "data": data, "message": "success"}
+
+
 def error_body(code: str, message: str) -> dict[str, Any]:
-    return {"error": {"code": code, "message": message}}
+    return {"code": code, "data": None, "message": message}
 
 
 def install_error_handlers(app: FastAPI) -> None:

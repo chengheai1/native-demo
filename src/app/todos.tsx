@@ -1,10 +1,15 @@
 import { Redirect } from 'expo-router';
 
 import { useAuth } from '@/auth/AuthProvider';
+import { getTodosRedirect } from '@/auth/routing';
+import { AuthLoadingScreen } from '@/components/AuthLoadingScreen';
 import { TodoScreen } from '@/features/todos/TodoScreen';
 
 export default function TodosRoute() {
   const { status } = useAuth();
-  if (status === 'signedIn') return <TodoScreen />;
-  return <Redirect href="/login" />;
+  const redirect = getTodosRedirect(status);
+
+  if (status === 'loading') return <AuthLoadingScreen />;
+  if (redirect) return <Redirect href={redirect} />;
+  return <TodoScreen />;
 }

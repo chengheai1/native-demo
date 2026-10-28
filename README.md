@@ -97,7 +97,7 @@ EXPO_PUBLIC_API_URL=http://192.168.2.105:8000 npx expo start
    ALLOW_DEMO_AUTH=true
    ```
 
-4. 重启 API。`GET /api/auth/config` 应返回 `{"google": true, ...}`，登录页的 Google 按钮会从「待配置」变为可用。若仍为 `false`，点击按钮会直接提示 `.env` 未配置。
+4. 重启 API。`GET /api/auth/config` 的 `data` 应包含 `{"google": true, ...}`，登录页的 Google 按钮会从「待配置」变为可用。若仍为 `false`，点击按钮会直接提示 `.env` 未配置。
 
 Expo Go 联调：
 
@@ -179,6 +179,8 @@ Expo Go 联调：
 SQLite 开启 WAL / foreign_keys / busy_timeout；写操作使用 `BEGIN IMMEDIATE` 显式事务。移动端 token 只存 SHA-256 hash，API 支持 Bearer 或 Cookie。
 
 ### API
+
+JSON 接口统一返回 `{ "code": 200, "data": ..., "message": "success" }`；错误时 `code` 为业务错误码、`data` 为 `null`。`204 No Content` 和 OAuth 重定向不包裹响应体。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |

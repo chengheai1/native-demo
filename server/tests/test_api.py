@@ -11,29 +11,54 @@ from app.google import GoogleUser
 from app.main import create_app
 
 
+def test_success_responses_use_standard_envelope(client: TestClient) -> None:
+    health = client.get("/api/health")
+    assert health.json() == {
+        "code": 200,
+        "data": {"status": "ok"},
+        "message": "success",
+    }
+    assert health.headers["content-length"] == str(len(health.content))
+    assert client.get("/api/auth/config").json() == {
+        "code": 200,
+        "data": {"google": True, "demo": True},
+        "message": "success",
+    }
+
+
+def test_error_responses_use_standard_envelope(client: TestClient) -> None:
+    response = client.get("/api/auth/me")
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "unauthorized",
+        "data": None,
+        "message": "请先登录",
+    }
+
+
 def test_health_and_config(client: TestClient) -> None:
-    assert client.get("/api/health").json() == {"status": "ok"}
-    assert client.get("/api/auth/config").json() == {"google": True, "demo": True}
+    assert client.get("/api/health").json()["data"] == {"status": "ok"}
+    assert client.get("/api/auth/config").json()["data"] == {"google": True, "demo": True}
 
 
 def test_me_requires_session(client: TestClient) -> None:
     response = client.get("/api/auth/me")
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "unauthorized"
+    assert response.json()["code"] == "unauthorized"
 
 
 def test_demo_login_seeds_and_logs_out(client: TestClient) -> None:
     response = client.post("/api/auth/demo")
     assert response.status_code == 201
-    user = response.json()["user"]
+    user = response.json()["data"]["user"]
     assert user["isDemo"] is True
     assert user["name"] == "体验用户"
 
     me = client.get("/api/auth/me")
     assert me.status_code == 200
-    assert me.json()["user"]["id"] == user["id"]
+    assert me.json()["data"]["user"]["id"] == user["id"]
 
-    todos = client.get("/api/todos").json()["todos"]
+    todos = client.get("/api/todos").json()["data"]["todos"]
     assert len(todos) == 3
     assert [todo["title"] for todo in todos][0] == "给今天留 20 分钟散步"
     assert sum(todo["completed"] for todo in todos) == 1
@@ -54,26 +79,26 @@ def test_demo_can_be_disabled(tmp_path) -> None:
     with TestClient(create_app(settings)) as client:
         response = client.post("/api/auth/demo")
         assert response.status_code == 403
-        assert response.json()["error"]["code"] == "demo_disabled"
+        assert response.json()["code"] == "demo_disabled"
 
 
 def test_todo_crud_and_clear_completed(demo_client: TestClient) -> None:
     created = demo_client.post("/api/todos", json={"title": "  写周报  "})
     assert created.status_code == 201
-    todo = created.json()["todo"]
+    todo = created.json()["data"]["todo"]
     assert todo["title"] == "写周报"
     assert todo["completed"] is False
 
     updated = demo_client.patch(f"/api/todos/{todo['id']}", json={"completed": True})
     assert updated.status_code == 200
-    assert updated.json()["todo"]["completed"] is True
+    assert updated.json()["data"]["todo"]["completed"] is True
 
     renamed = demo_client.patch(f"/api/todos/{todo['id']}", json={"title": "写周报并发送"})
-    assert renamed.json()["todo"]["title"] == "写周报并发送"
+    assert renamed.json()["data"]["todo"]["title"] == "写周报并发送"
 
     empty_update = demo_client.patch(f"/api/todos/{todo['id']}", json={})
     assert empty_update.status_code == 400
-    assert empty_update.json()["error"]["code"] == "empty_update"
+    assert empty_update.json()["code"] == "empty_update"
 
     deleted = demo_client.delete(f"/api/todos/{todo['id']}")
     assert deleted.status_code == 204
@@ -81,13 +106,13 @@ def test_todo_crud_and_clear_completed(demo_client: TestClient) -> None:
 
     cleared = demo_client.post("/api/todos/clear-completed")
     assert cleared.status_code == 200
-    assert cleared.json()["deleted"] == 1
+    assert cleared.json()["data"]["deleted"] == 1
 
 
 def test_todo_validation(demo_client: TestClient) -> None:
     blank = demo_client.post("/api/todos", json={"title": "   "})
     assert blank.status_code == 422
-    assert blank.json()["error"]["code"] == "invalid_request"
+    assert blank.json()["code"] == "invalid_request"
 
     too_long = demo_client.post("/api/todos", json={"title": "x" * 201})
     assert too_long.status_code == 422
@@ -96,11 +121,11 @@ def test_todo_validation(demo_client: TestClient) -> None:
 def test_users_are_isolated(demo_client: TestClient) -> None:
     created = demo_client.post("/api/todos", json={"title": "只有我能看到"})
     assert created.status_code == 201
-    todo_id = created.json()["todo"]["id"]
+    todo_id = created.json()["data"]["todo"]["id"]
 
     other = TestClient(demo_client.app)
     other.post("/api/auth/demo")
-    other_todos = other.get("/api/todos").json()["todos"]
+    other_todos = other.get("/api/todos").json()["data"]["todos"]
     assert all(todo["title"] != "只有我能看到" for todo in other_todos)
     assert other.delete(f"/api/todos/{todo_id}").status_code == 404
     assert other.patch(f"/api/todos/{todo_id}", json={"completed": True}).status_code == 404
@@ -113,7 +138,7 @@ def test_origin_check(demo_client: TestClient) -> None:
         headers={"origin": "https://evil.example"},
     )
     assert response.status_code == 403
-    assert response.json()["error"]["code"] == "origin_not_allowed"
+    assert response.json()["code"] == "origin_not_allowed"
 
 
 def test_expired_session_is_rejected(settings: Settings, client: TestClient) -> None:
@@ -124,7 +149,7 @@ def test_expired_session_is_rejected(settings: Settings, client: TestClient) -> 
 
     response = client.get("/api/auth/me")
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "unauthorized"
+    assert response.json()["code"] == "unauthorized"
 
 
 def test_google_start_requires_configuration(tmp_path) -> None:
@@ -202,7 +227,7 @@ def test_google_callback_success(
 
     me = client.get("/api/auth/me")
     assert me.status_code == 200
-    user = me.json()["user"]
+    user = me.json()["data"]["user"]
     assert user["email"] == "hello@example.com"
     assert user["name"] == "Cheng He"
     assert user["isDemo"] is False
@@ -238,7 +263,7 @@ def test_google_callback_rejects_unverified_email(
 def test_native_demo_returns_bearer_token(client: TestClient) -> None:
     response = client.post("/api/auth/native/demo")
     assert response.status_code == 201
-    payload = response.json()
+    payload = response.json()["data"]
     token = payload["token"]
     assert payload["user"]["isDemo"] is True
     assert token
@@ -246,13 +271,13 @@ def test_native_demo_returns_bearer_token(client: TestClient) -> None:
     headers = {"authorization": f"Bearer {token}"}
     me = client.get("/api/auth/me", headers=headers)
     assert me.status_code == 200
-    assert me.json()["user"]["id"] == payload["user"]["id"]
-    assert len(client.get("/api/todos", headers=headers).json()["todos"]) == 3
+    assert me.json()["data"]["user"]["id"] == payload["user"]["id"]
+    assert len(client.get("/api/todos", headers=headers).json()["data"]["todos"]) == 3
     assert "xu_session" not in response.cookies
 
 
 def test_native_logout_revokes_bearer_token(client: TestClient) -> None:
-    token = client.post("/api/auth/native/demo").json()["token"]
+    token = client.post("/api/auth/native/demo").json()["data"]["token"]
     headers = {"authorization": f"Bearer {token}"}
     assert client.post("/api/auth/logout", headers=headers).status_code == 204
     assert client.get("/api/auth/me", headers=headers).status_code == 401
@@ -290,17 +315,17 @@ def test_native_oauth_exchange_flow(client: TestClient, monkeypatch) -> None:
 
     exchanged = client.post("/api/auth/native/exchange", json={"code": login_code})
     assert exchanged.status_code == 200
-    token = exchanged.json()["token"]
-    assert exchanged.json()["user"]["email"] == "native@example.com"
+    token = exchanged.json()["data"]["token"]
+    assert exchanged.json()["data"]["user"]["email"] == "native@example.com"
     assert "xu_session" not in exchanged.cookies
 
     me = client.get("/api/auth/me", headers={"authorization": f"Bearer {token}"})
     assert me.status_code == 200
-    assert me.json()["user"]["name"] == "Native User"
+    assert me.json()["data"]["user"]["name"] == "Native User"
 
     replay = client.post("/api/auth/native/exchange", json={"code": login_code})
     assert replay.status_code == 401
-    assert replay.json()["error"]["code"] == "invalid_code"
+    assert replay.json()["code"] == "invalid_code"
 
 
 def test_native_oauth_rejects_untrusted_redirect(client: TestClient) -> None:
@@ -310,7 +335,7 @@ def test_native_oauth_rejects_untrusted_redirect(client: TestClient) -> None:
         follow_redirects=False,
     )
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "invalid_redirect"
+    assert response.json()["code"] == "invalid_redirect"
 
 
 def test_web_oauth_fallback_flow(client: TestClient, monkeypatch) -> None:
@@ -345,4 +370,4 @@ def test_web_oauth_fallback_flow(client: TestClient, monkeypatch) -> None:
     code = parse_qs(urlparse(location).query)["code"][0]
     exchanged = client.post("/api/auth/native/exchange", json={"code": code})
     assert exchanged.status_code == 200
-    assert exchanged.json()["user"]["email"] == "web@example.com"
+    assert exchanged.json()["data"]["user"]["email"] == "web@example.com"

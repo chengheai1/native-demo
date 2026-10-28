@@ -20,7 +20,7 @@ import type { User } from '@/api/types';
 import { API_URL } from '@/lib/api-url';
 import { clearSessionToken, readSessionToken, writeSessionToken } from '@/lib/storage';
 
-type AuthStatus = 'loading' | 'signedOut' | 'signedIn' | 'error';
+import type { AuthStatus } from './routing';
 
 type AuthContextValue = {
   status: AuthStatus;

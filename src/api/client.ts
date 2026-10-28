@@ -1,5 +1,7 @@
 import { API_URL } from '@/lib/api-url';
 
+import { unwrapApiResponse, type ApiResponse } from './response';
+
 const REQUEST_TIMEOUT_MS = 15_000;
 
 let authToken: string | null = null;
@@ -26,13 +28,6 @@ export function onUnauthorized(listener: () => void): () => void {
   return () => unauthorizedListeners.delete(listener);
 }
 
-type ErrorPayload = {
-  error?: {
-    code?: string;
-    message?: string;
-  };
-};
-
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -57,18 +52,21 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
       return undefined as T;
     }
 
-    const payload = (await response.json().catch(() => null)) as (T & ErrorPayload) | null;
+    const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
 
     if (!response.ok) {
-      const code = payload?.error?.code ?? `http_${response.status}`;
-      const message = payload?.error?.message ?? '请求失败，请稍后重试';
+      const code = payload?.code === undefined ? `http_${response.status}` : String(payload.code);
+      const message = payload?.message ?? '请求失败，请稍后重试';
       if (response.status === 401) {
         unauthorizedListeners.forEach((listener) => listener());
       }
       throw new ApiError(response.status, code, message);
     }
 
-    return payload as T;
+    if (payload === null) {
+      throw new ApiError(response.status, 'invalid_response', '服务器响应格式不正确');
+    }
+    return unwrapApiResponse(payload);
   } catch (error) {
     if (error instanceof ApiError) throw error;
     if (error instanceof Error && error.name === 'AbortError') {

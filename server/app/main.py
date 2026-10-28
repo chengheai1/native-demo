@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -10,7 +11,7 @@ from fastapi.responses import JSONResponse
 from .auth import router as auth_router
 from .config import Settings
 from .db import init_db
-from .errors import ApiError, error_body, install_error_handlers
+from .errors import ApiError, error_body, install_error_handlers, success_body
 from .google import GoogleClient
 from .todos import router as todos_router
 
@@ -71,6 +72,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if request.url.path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
+
+    @app.middleware("http")
+    async def standard_api_response(request: Request, call_next):
+        response = await call_next(request)
+        is_api = request.url.path.startswith("/api/")
+        is_openapi = request.url.path == "/api/openapi.json"
+        is_json = response.headers.get("content-type", "").startswith("application/json")
+        if not is_api or is_openapi or not is_json or not 200 <= response.status_code < 300:
+            return response
+        if response.status_code == 204:
+            return response
+
+        body = b"".join([chunk async for chunk in response.body_iterator])
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        return JSONResponse(
+            status_code=response.status_code,
+            content=success_body(json.loads(body)),
+            headers=headers,
+            background=response.background,
+        )
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
