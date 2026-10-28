@@ -15,6 +15,7 @@ import { TrashIcon } from '@/components/Icons';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { Todo } from '@/api/types';
+import { isSaveButtonActive } from './editFormState';
 
 export function EditSheet({
   todo,
@@ -135,7 +136,11 @@ function EditForm({
           accessibilityRole="button"
           style={[
             styles.save,
-            { backgroundColor: canSave ? colors.ink : colors.tabTrack },
+            {
+              backgroundColor: isSaveButtonActive({ canSave, saving })
+                ? colors.ink
+                : colors.tabTrack,
+            },
           ]}>
           {saving ? (
             <ActivityIndicator size="small" color={colors.paper} />

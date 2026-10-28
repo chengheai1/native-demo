@@ -43,6 +43,7 @@ export function TodoItem({
   const { colors } = useTheme();
   const reveal = useSharedValue(0);
   const startReveal = useSharedValue(0);
+  const settleOffset = useSharedValue(0);
   const rowWidth = useSharedValue(0);
   const checkScale = useSharedValue(todo.completed ? 1 : 0.94);
 
@@ -55,15 +56,17 @@ export function TodoItem({
 
   useEffect(() => {
     if (openId !== todo.id) {
+      settleOffset.value = 0;
       reveal.value = withTiming(0, { duration: 170, easing: Easing.out(Easing.cubic) });
     }
-  }, [openId, reveal, todo.id]);
+  }, [openId, reveal, settleOffset, todo.id]);
 
   const pan = Gesture.Pan()
     .enabled(!pending)
     .activeOffsetX([-14, 14])
     .failOffsetY([-14, 14])
     .onStart(() => {
+      settleOffset.value = 0;
       startReveal.value = reveal.value;
       runOnJS(onOpen)(todo.id);
     })
@@ -78,9 +81,14 @@ export function TodoItem({
       const open = current > ACTION_WIDTH / 2 || event.velocityX < -650;
       const close = event.velocityX > 650 || current <= ACTION_WIDTH / 2;
       const shouldOpen = open && !close;
-      reveal.value = shouldOpen
-        ? withSpring(ACTION_WIDTH, { damping: 18, stiffness: 260, mass: 0.7 })
-        : withTiming(0, { duration: 190, easing: Easing.out(Easing.cubic) });
+      reveal.value = withTiming(shouldOpen ? ACTION_WIDTH : 0, {
+        duration: 190,
+        easing: Easing.out(Easing.cubic),
+      });
+      settleOffset.value = shouldOpen ? -4 : 0;
+      if (shouldOpen) {
+        settleOffset.value = withSpring(0, { damping: 16, stiffness: 260, mass: 0.7 });
+      }
       runOnJS(onOpen)(shouldOpen ? todo.id : null);
     });
 
@@ -107,6 +115,7 @@ export function TodoItem({
 
   const actionsStyle = useAnimatedStyle(() => ({
     width: reveal.value,
+    transform: [{ translateX: settleOffset.value }],
   }));
 
   const titleStyle = useAnimatedStyle(() => ({
@@ -135,6 +144,7 @@ export function TodoItem({
   }));
 
   function closeActions() {
+    settleOffset.value = 0;
     reveal.value = withTiming(0, { duration: 170, easing: Easing.out(Easing.cubic) });
   }
 
@@ -168,22 +178,16 @@ export function TodoItem({
             onPress={() => execute(onToggle)}
             accessibilityRole="button"
             accessibilityLabel={todo.completed ? '撤销完成' : '标记完成'}
-            style={[styles.actionButton, { backgroundColor: '#C97E30' }]}
-          />
+            style={[styles.actionButton, { backgroundColor: '#C97E30' }]}>
+            <Text style={styles.actionText}>{todo.completed ? '撤销' : '完成'}</Text>
+          </Pressable>
           <Pressable
             onPress={() => execute(onDelete)}
             accessibilityRole="button"
             accessibilityLabel="删除任务"
-            style={[styles.actionButton, { backgroundColor: '#FA5151' }]}
-          />
-        </View>
-        <View
-          pointerEvents="none"
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          style={styles.actionsText}>
-          <Text style={styles.actionText}>{todo.completed ? '撤销' : '完成'}</Text>
-          <Text style={styles.actionText}>删除</Text>
+            style={[styles.actionButton, { backgroundColor: '#FA5151' }]}>
+            <Text style={styles.actionText}>删除</Text>
+          </Pressable>
         </View>
       </Animated.View>
 
@@ -276,20 +280,12 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     flexDirection: 'row',
-  },
-  actionsText: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    right: 0,
-    width: ACTION_WIDTH,
-    flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: '#C97E30',
   },
   actionButton: {
     flex: 1,
     height: '100%',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
     overflow: 'hidden',
   },
