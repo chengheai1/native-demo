@@ -213,7 +213,7 @@ npx expo export --platform android --output-dir /tmp/xu-android
 
 # 后端
 cd server
-.venv/bin/pytest   # 19 tests
+.venv/bin/pytest   # 21 tests
 ```
 
 后端覆盖 OAuth state/回调、native/web code 交换、演示开关、会话过期、Todo CRUD、用户隔离、参数校验、Origin 校验。App 侧纯函数测试覆盖日期、姓名、相对时间和 Toast 标题截断。
@@ -227,7 +227,28 @@ docker compose up --build
 
 单容器只包含 FastAPI；SQLite 数据在 `xu-data` volume。Compose 为了本地演示开启 `ALLOW_DEMO_AUTH=true`。公开部署请关闭演示，并配置 Google 凭据与 HTTPS。
 
-> 本机 Docker daemon 未运行，容器构建未实际执行。
+> 这套 compose 只用于本地演示；生产发布走下一节的脚本（镜像在服务器上构建）。
+
+## 部署（生产）
+
+线上 API：`https://app.api.stack021.com`（Cloudflare → 宿主 `nginx` → `xu-api` 容器）。
+
+```bash
+cd server
+./deploy.sh
+```
+
+脚本流程：本地 `app/` 与构建文件 rsync 到 `ubuntu@203.0.113.10:/opt/xu-api` → 服务器 `docker build` 打时间戳镜像 → 旧容器改名 `xu-api-prev` → 起新容器 → 轮询 `/api/health` → 成功则删旧容器、按时间戳标签保留最近 3 个镜像（手工标签如 `1.0` 不动）；失败自动把 `xu-api-prev` 换回来。
+
+- 运行时配置（Google 凭据、域名、`APP_ENV`）在服务器 `/opt/xu-api/run.env`（600），脚本只读不写；首次部署会生成模板并退出
+- 每次发布前把代码 tar 和 SQLite 快照放到 `/opt/xu-api/backups/`（保留 5 份），快照失败会中止发布
+- 发布的是**工作区代码**，包含未提交改动；建议先 commit
+- 脚本不碰 nginx / 证书，`app.api.stack021.com` 的 server 块在宿主 `nginx` 的 `prod.conf` 里
+- 手动回滚：
+
+```bash
+ssh ubuntu@203.0.113.10 'docker rm -f xu-api && docker rename xu-api-prev xu-api && docker start xu-api'
+```
 
 ## 目录
 
@@ -247,6 +268,8 @@ src/
 server/
   app/                 FastAPI、SQLite、Google OAuth
   tests/               pytest
+  deploy.sh            生产发布脚本
+  data/                SQLite 数据文件（本地开发）
 docs/
   todo-google-login-plan.md
   screenshots/         Expo Web 预览截图

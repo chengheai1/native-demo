@@ -21,7 +21,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------- 可覆盖配置 ----------------
 DEPLOY_HOST="${DEPLOY_HOST:-203.0.113.10}"
 DEPLOY_USER="${DEPLOY_USER:-ubuntu}"
-SSH_OPTS="${SSH_OPTS:--o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new}"
+SSH_OPTS="${SSH_OPTS:--o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+  -o ControlMaster=auto -o ControlPath=/tmp/ssh-xu-%r@%h-%p -o ControlPersist=60}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/xu-api}"
 CONTAINER="${CONTAINER:-xu-api}"
 IMAGE="${IMAGE:-xu-api}"
@@ -49,10 +50,17 @@ fi
 step() { printf '%s==>%s %s\n' "$C_BLUE" "$C_OFF" "$*"; }
 info() { printf '    %s\n' "$*"; }
 warn() { printf '%s⚠%s %s\n' "$C_YELLOW" "$C_OFF" "$*" >&2; }
-die()  { printf '%s✗%s %s\n' "$C_RED" "$C_OFF" "$*" >&2; exit 1; }
+# 失败即退出；若已经切过容器，先把旧容器换回来再退出
+die() {
+  printf '%s✗%s %s\n' "$C_RED" "$C_OFF" "$*" >&2
+  if [ "${SWAPPED:-0}" = 1 ]; then rollback; fi
+  exit 1
+}
 ok()   { printf '%s✓%s %s\n' "$C_GREEN" "$C_OFF" "$*"; }
 
-remote() { ssh $SSH_OPTS "$TARGET" "$@"; }
+remote() { ssh $SSH_OPTS "$TARGET" "$@" < /dev/null; }
+# 需要从 heredoc 喂 stdin 的场景（远端 bash -s）
+remote_script() { ssh $SSH_OPTS "$TARGET" "$@"; }
 
 usage() { sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -70,7 +78,11 @@ rollback() {
   remote "docker rm -f '$CONTAINER'" >/dev/null 2>&1 || true
   if remote "docker inspect '$CONTAINER-prev'" >/dev/null 2>&1; then
     if remote "docker rename '$CONTAINER-prev' '$CONTAINER' && docker start '$CONTAINER'" >/dev/null; then
-      warn "已回滚，服务恢复为上一个版本"
+      if remote "timeout 8 $HEALTH_PROBE" >/dev/null 2>&1; then
+        warn "已回滚，旧版本健康检查通过"
+      else
+        warn "已回滚，但旧版本健康检查未通过，请人工确认"
+      fi
     else
       warn "回滚失败，请人工介入：ssh $TARGET 'docker ps -a'"
     fi
@@ -116,7 +128,7 @@ info "目标 $TARGET:$REMOTE_DIR  镜像 $IMAGE:$TAG (git $GIT_REV)"
 
 # ---------------- 2/7 运行时配置 ----------------
 step "[2/7] 检查 $REMOTE_DIR/run.env"
-env_state="$(remote "bash -s" <<REMOTE
+env_state="$(remote_script "bash -s" <<REMOTE
 set -euo pipefail
 cd '$REMOTE_DIR'
 mkdir -p data backups
@@ -155,7 +167,7 @@ esac
 
 # ---------------- 3/7 备份 ----------------
 step "[3/7] 备份代码与数据库（保留最近 $KEEP_DB_BACKUPS 份）"
-remote "bash -s" <<REMOTE
+remote_script "bash -s" <<REMOTE
 set -euo pipefail
 cd '$REMOTE_DIR'
 mkdir -p data/backups backups
@@ -171,7 +183,7 @@ dst.close(); src.close()
 else
   echo "    容器未运行，跳过数据库快照"
 fi
-ls -1t backups/app-*.db 2>/dev/null | tail -n +$((KEEP_DB_BACKUPS + 1)) | xargs -r rm -f || true
+ls -1t data/backups/app-*.db 2>/dev/null | tail -n +$((KEEP_DB_BACKUPS + 1)) | xargs -r rm -f || true
 ls -1t backups/app-*.tar.gz 2>/dev/null | tail -n +$((KEEP_DB_BACKUPS + 1)) | xargs -r rm -f || true
 REMOTE
 
@@ -184,10 +196,11 @@ info "已同步 app/ 与构建文件"
 
 # ---------------- 5/7 构建镜像 ----------------
 step "[5/7] 服务器构建镜像 $IMAGE:$TAG"
-if ! remote "cd '$REMOTE_DIR' && docker build \
+if ! build_log="$(remote "cd '$REMOTE_DIR' && docker build \
   --label org.opencontainers.image.revision='$GIT_REV' \
   --label org.opencontainers.image.title='xu-api' \
-  -t '$IMAGE:$TAG' ." >/dev/null; then
+  -t '$IMAGE:$TAG' . 2>&1")"; then
+  printf '%s\n' "$build_log" | tail -40 >&2
   die "镜像构建失败（运行中的容器未改动）"
 fi
 
@@ -206,14 +219,21 @@ fi
 
 # ---------------- 7/7 探活 ----------------
 step "[7/7] 探活"
-healthy=0
-for _ in $(seq 1 30); do
-  if remote "timeout 5 $HEALTH_PROBE" >/dev/null 2>&1; then healthy=1; break; fi
+# 整个等待过程放在一次 ssh 里，避免逐次连接的开销（跨省/跨境链路可达数秒）
+if remote_script "bash -s" <<REMOTE
+set -u
+for _ in \$(seq 1 20); do
+  if $HEALTH_PROBE >/dev/null 2>&1; then exit 0; fi
   sleep 2
 done
-if [ "$healthy" != 1 ]; then
+exit 1
+REMOTE
+then
+  info "容器 40s 内通过健康检查"
+else
   remote "docker logs --tail 40 '$CONTAINER' 2>&1" >&2 || true
-  die "容器 60s 内未通过健康检查"
+  remote "timeout 5 $HEALTH_PROBE" >&2 || true
+  die "容器 40s 内未通过健康检查"
 fi
 
 body="$(remote "$HEALTH_PROBE" || true)"
@@ -231,11 +251,13 @@ esac
 SWAPPED=0
 remote "docker rm -f '$CONTAINER-prev'" >/dev/null || warn "旧容器清理失败，可稍后手动 docker rm -f $CONTAINER-prev"
 
-# 旧镜像只保留最近 KEEP_IMAGES 个（当前版本必然是最新的那个）
-old_tags="$(remote "docker images '$IMAGE' --format '{{.CreatedAt}} {{.Tag}}' | sort -r | awk '{print \$2}' | grep -v '^<none>$' | tail -n +$((KEEP_IMAGES + 1))" || true)"
+# 旧镜像只保留最近 KEEP_IMAGES 个发布标签（时间戳标签天然按时间排序）；
+# 手工打的标签（如 1.0）不动，避免误删
+old_tags="$(remote "docker images '$IMAGE' --format '{{.Tag}}' | grep -E '^[0-9]{8}-[0-9]{6}$' | sort -r | tail -n +$((KEEP_IMAGES + 1))" || true)"
 for old in $old_tags; do
   remote "docker rmi '$IMAGE:$old'" >/dev/null 2>&1 || true
 done
+[ -z "$old_tags" ] || info "已清理旧镜像：$(printf '%s ' $old_tags)"
 
 # 公网自检：反代/证书不由本脚本负责，失败只告警
 if pub="$(curl -fsS --max-time 10 "$PUBLIC_HEALTH" 2>/dev/null)"; then

@@ -1,4 +1,10 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+This is an Expo/React Native mobile application (Expo SDK 58) backed by a small FastAPI + SQLite service in the same repo. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+
+## Layout
+
+- `src/` — the Expo app. Routes live in `src/app/` (every file is a screen), everything else outside it.
+- `server/` — FastAPI app (`server/app/`), pytest suite (`server/tests/`), SQLite file (`server/data/app.db`), production script (`server/deploy.sh`).
+- `docs/` — screenshots and design notes.
 
 ## Expo has changed — do not trust your training data
 
@@ -13,15 +19,62 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
 
 ```bash
+# App
 npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
 npx expo start              # start the dev server
 npx expo lint               # lint
 npx tsc --noEmit            # typecheck
 npx expo-doctor             # diagnose dependency and config issues
 npx expo install --fix      # fix incompatible package versions
+npm test                    # pure-function tests (node --test)
 ```
 
-Run lint and typecheck before declaring any task done.
+```bash
+# API
+cd server
+python3.11 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn app.main:app --reload --port 8000
+.venv/bin/pytest -q
+```
+
+Run lint, typecheck, and `server/.venv/bin/pytest -q` before declaring a task done.
+
+## API contract
+
+- Every `/api/*` JSON response is wrapped: success is `{"code": 200, "data": ..., "message": "success"}`, failure is `{"code": "<snake_case_code>", "data": null, "message": "<中文提示>"}`. The wrapping lives in the `standard_api_response` middleware (`server/app/main.py`). Handlers return plain dicts/lists and raise `ApiError` — never hand-build the envelope.
+- 204 responses, 3xx redirects (OAuth start/callback), and non-JSON responses are not wrapped.
+- The client unwraps exactly once in `src/api/client.ts` using `unwrapApiResponse` (`src/api/response.ts`). If the envelope changes, update both sides and `src/api/response.test.ts` in the same change.
+- Auth: mobile sends `Authorization: Bearer <token>`; the web fallback uses the `xu_session` HttpOnly cookie. The token is kept in `expo-secure-store` (web: `localStorage`) under `xu.session.token` — see `src/lib/storage.ts`.
+- API base URL comes from `EXPO_PUBLIC_API_URL`, otherwise derived from the Expo `hostUri` / emulator defaults — see `src/lib/api-url.ts`.
+
+## Backend conventions
+
+- SQLite path from `DATABASE_PATH`, default `server/data/app.db`; WAL mode; schema in `server/app/db.py` via `CREATE TABLE IF NOT EXISTS`. There is no migration framework, so schema edits must stay idempotent for existing databases.
+- Settings come from `server/.env` and `server/.env.local` (the latter wins) through `Settings.from_env()` in `server/app/config.py`.
+- Sessions store only SHA-256 hashes of bearer tokens; OAuth state and one-time login codes are hashed and time-boxed too. Don't log tokens.
+- Timestamps are ISO-8601 UTC strings (`db.iso()`).
+- pytest fixtures build a throwaway database (`server/tests/conftest.py`) — tests must never touch `server/data/app.db`.
+
+## Deploying
+
+Production API: `https://app.api.stack021.com` — Cloudflare → host `nginx` → `xu-api` container on `bridge`.
+
+```bash
+cd server
+./deploy.sh
+```
+
+What it does: rsync `app/` + build files to `ubuntu@203.0.113.10:/opt/xu-api` → `docker build` a timestamped image → stop the running container and rename it `xu-api-prev` → start the new one → poll `/api/health` → on success delete `xu-api-prev` and prune old images (last 3); on failure restore `xu-api-prev` automatically.
+
+- Runtime secrets live only in `/opt/xu-api/run.env` (mode 600) on the server. The script reads it, never overwrites it, and derives it from the running container if it is missing. Never commit it or echo it.
+- A deploy ships the **working tree**, including uncommitted changes. Commit first; the script labels the image with the git revision (`-dirty` when the tree is dirty).
+- The script aborts if `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are missing — production has demo login disabled, so they are required.
+- Before switching, it takes a code tarball and a SQLite snapshot into `/opt/xu-api/backups/` (keeps 5), and refuses to continue if the snapshot fails.
+- Manual rollback (the previous container is kept until the next successful deploy):
+  `ssh ubuntu@203.0.113.10 'docker rm -f xu-api && docker rename xu-api-prev xu-api && docker start xu-api'`
+- The script does not touch nginx or TLS. The `app.api.stack021.com` server block and certificate live on the host's `nginx`; change those deliberately, not as part of an app deploy.
+- Never deploy dev settings (`ALLOW_DEMO_AUTH=true`, `COOKIE_SECURE=false`) to production.
 
 ## Navigation & Routing
 
