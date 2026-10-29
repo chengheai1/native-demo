@@ -87,8 +87,27 @@ What it does: rsync `app/` + build files to `ubuntu@203.0.113.10:/opt/xu-api` �
 Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
 Docs: https://docs.expo.dev/eas/index.md
 
+## Building an Android APK
+
+`eas.json` defines two profiles: `preview` (APK, internal distribution) and `production`
+(AAB with `autoIncrement`). Both inject `EXPO_PUBLIC_API_URL=https://app.api.stack021.com`
+through `env`; `.env.local` is gitignored and never reaches EAS, so the URL must stay here.
+
+```bash
+EAS_NO_VCS=1 eas build -p android --profile preview
+```
+
+`EAS_NO_VCS=1` is required on this machine: the global eas-cli is an x64 build running under
+Rosetta and its `git` probe fails with an xcrun architecture error. On an arm64 Node setup the
+flag can be dropped.
+
+Release signing uses a local keystore — `credentials/android/keystore.jks` plus
+`credentials.json` (`"credentialsSource": "local"` in eas.json). Both are gitignored. Never
+commit them and never lose them: the same keystore is required to update an installed app or
+an existing Play listing.
+
 ## Rules
 
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
+- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or add `expo-dev-client` and a `development` profile before building on EAS.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md

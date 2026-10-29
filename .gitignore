@@ -47,3 +47,5 @@ example
 /android
 
 .kimi-tmp/
+# 本地临时产物
+.tmp/

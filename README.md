@@ -250,6 +250,25 @@ cd server
 ssh ubuntu@203.0.113.10 'docker rm -f xu-api && docker rename xu-api-prev xu-api && docker start xu-api'
 ```
 
+## 打包 Android APK（EAS）
+
+项目已关联 EAS：`@frank.cheng/native-demo`（`app.json` 里有 `extra.eas.projectId`）。`eas.json` 两个 profile：
+
+| profile | 产物 | 用途 |
+| --- | --- | --- |
+| `preview` | `.apk` | 直接装手机 / 模拟器 |
+| `production` | `.aab` | Google Play 上架，自动递增 versionCode |
+
+```bash
+EAS_NO_VCS=1 eas build -p android --profile preview
+eas build:list --platform android   # 查历史构建与产物链接
+```
+
+- 本机的 eas-cli 是 x86_64（跑在 Rosetta），调 `/usr/bin/git` 会因 xcrun 缺 x86_64 切片失败，所以用 `EAS_NO_VCS=1` 走无 VCS 上传；换成 arm64 Node 环境后可以去掉这个变量
+- API 地址由 `eas.json` 的 `env.EXPO_PUBLIC_API_URL` 注入（`.env.local` 被 gitignore，不会进构建包），换后端域名要重新打包
+- 签名用本地 keystore：`credentials/android/keystore.jks` + `credentials.json`，两者都已 gitignore。**keystore 必须单独备份**，丢了就无法再更新已安装的应用/上架
+- 免费套餐会排队，Android 构建单次约 10–20 分钟
+
 ## 目录
 
 ```text
