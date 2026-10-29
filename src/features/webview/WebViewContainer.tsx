@@ -18,9 +18,13 @@ type WebViewBridgeMessage = {
 export function WebViewContainer({
   url,
   onCloseRequest,
+  onNavigate,
+  onProgressChange,
 }: {
   url: string;
   onCloseRequest?: () => void;
+  onNavigate?: (page: { url: string; title?: string }) => void;
+  onProgressChange?: (progress: number) => void;
 }) {
   const { colors } = useTheme();
   // v14's `WebView` defaults its generic to `undefined`, which collapses props to
@@ -99,10 +103,18 @@ export function WebViewContainer({
         </View>
       )}
       onMessage={({ nativeEvent }) => handleWebMessage(nativeEvent.data)}
-      onError={({ nativeEvent }) =>
-        setError(nativeEvent.description || '加载失败，请检查网络或网址')
-      }
-      onHttpError={({ nativeEvent }) => setError(`服务器返回 HTTP ${nativeEvent.statusCode}`)}
+      onNavigationStateChange={({ url: nextUrl, title: nextTitle }) => {
+        if (nextUrl) onNavigate?.({ url: nextUrl, title: nextTitle });
+      }}
+      onLoadProgress={({ nativeEvent }) => onProgressChange?.(nativeEvent.progress)}
+      onError={({ nativeEvent }) => {
+        onProgressChange?.(1);
+        setError(nativeEvent.description || '加载失败，请检查网络或网址');
+      }}
+      onHttpError={({ nativeEvent }) => {
+        onProgressChange?.(1);
+        setError(`服务器返回 HTTP ${nativeEvent.statusCode}`);
+      }}
     />
   );
 }

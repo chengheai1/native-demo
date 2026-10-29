@@ -21,9 +21,13 @@ type BridgeEnvelope = {
 export function WebViewContainer({
   url,
   onCloseRequest,
+  onNavigate,
+  onProgressChange,
 }: {
   url: string;
   onCloseRequest?: () => void;
+  onNavigate?: (page: { url: string; title?: string }) => void;
+  onProgressChange?: (progress: number) => void;
 }) {
   const { colors } = useTheme();
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -69,7 +73,11 @@ export function WebViewContainer({
         key={url}
         src={url}
         title="WebView"
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          setLoaded(true);
+          onProgressChange?.(1);
+          onNavigate?.({ url });
+        }}
         style={frameStyle}
       />
       {loaded ? null : (

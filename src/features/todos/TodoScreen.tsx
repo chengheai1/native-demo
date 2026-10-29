@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator,
@@ -43,7 +44,6 @@ import {
 } from './mutations';
 import { ProfileSheet } from '@/features/profile/ProfileSheet';
 import { DebugPanel } from '@/features/debug/DebugPanel';
-import { WebViewSheet } from '@/features/webview/WebViewSheet';
 
 export function TodoScreen() {
   const { user, signOut } = useAuth();
@@ -55,11 +55,9 @@ export function TodoScreen() {
   const [editing, setEditing] = useState<Todo | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
-  const [webViewOpen, setWebViewOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [today, setToday] = useState(() => new Date());
   const composerRef = useRef<ComponentRef<typeof TextInput>>(null);
-  const webViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const webViewPending = useRef(false);
 
   const todosQuery = useQuery({
@@ -79,12 +77,6 @@ export function TodoScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (webViewTimer.current) clearTimeout(webViewTimer.current);
-    };
-  }, []);
-
   function openWebView() {
     webViewPending.current = true;
     setProfileOpen(false);
@@ -93,13 +85,7 @@ export function TodoScreen() {
   function handleProfileClosed() {
     if (!webViewPending.current) return;
     webViewPending.current = false;
-    if (webViewTimer.current) clearTimeout(webViewTimer.current);
-    // iOS presents only one modal at a time. The account sheet's native modal is
-    // fully dismissed by now; give UIKit a beat before presenting the next one.
-    webViewTimer.current = setTimeout(
-      () => setWebViewOpen(true),
-      Platform.OS === 'ios' ? 100 : 0,
-    );
+    router.push('/webview');
   }
 
   const todos = useMemo(() => todosQuery.data ?? [], [todosQuery.data]);
@@ -389,8 +375,6 @@ export function TodoScreen() {
       />
 
       <DebugPanel visible={debugOpen} onClose={() => setDebugOpen(false)} />
-
-      <WebViewSheet visible={webViewOpen} onClose={() => setWebViewOpen(false)} />
     </AppScreen>
   );
 }

@@ -148,6 +148,18 @@ export function ChevronRightIcon({
   );
 }
 
+export function ChevronLeftIcon({
+  size = 20,
+  color = 'currentColor',
+  strokeWidth = 1.8,
+}: IconProps) {
+  return (
+    <Svg {...base(size, color, strokeWidth)}>
+      <Path d="m15 6-6 6 6 6" />
+    </Svg>
+  );
+}
+
 export function MonitorIcon({ size = 20, color = 'currentColor', strokeWidth = 1.8 }: IconProps) {
   return (
     <Svg {...base(size, color, strokeWidth)}>

@@ -28,6 +28,7 @@ function RootNavigator() {
           <Stack.Screen name="index" />
           <Stack.Screen name="login" />
           <Stack.Screen name="todos" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="webview" options={{ animation: 'slide_from_right' }} />
           <Stack.Screen name="web-auth" />
           <Stack.Screen name="+not-found" />
         </Stack>
