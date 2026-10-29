@@ -33,6 +33,10 @@ yarn-error.*
 # local env files
 .env*.local
 
+# EAS 本地签名材料（credentials.json 含 keystore 密码）
+credentials.json
+credentials/
+
 # typescript
 *.tsbuildinfo
 

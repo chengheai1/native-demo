@@ -1,0 +1,28 @@
+{
+  "cli": {
+    "version": ">= 27.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "credentialsSource": "local",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://app.api.stack021.com"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "credentialsSource": "local",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://app.api.stack021.com"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
