@@ -18,7 +18,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { WebViewContainer } from './WebViewContainer';
 import { normalizeWebViewUrl } from './url';
 
-export const DEFAULT_WEBVIEW_URL = 'https://baidu.com';
+export const DEFAULT_WEBVIEW_URL = 'https://stack021.com/';
 
 export function WebViewSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { colors } = useTheme();
@@ -82,7 +82,7 @@ export function WebViewSheet({ visible, onClose }: { visible: boolean; onClose: 
                 if (invalid) setInvalid(false);
               }}
               onSubmitEditing={load}
-              placeholder="https://baidu.com"
+              placeholder="https://stack021.com/"
               placeholderTextColor={colors.faint}
               selectionColor={colors.accent}
               autoCapitalize="none"
@@ -108,7 +108,7 @@ export function WebViewSheet({ visible, onClose }: { visible: boolean; onClose: 
 
           {invalid ? (
             <Text style={[styles.hint, { color: colors.accent }]}>
-              请输入有效的网址，例如 baidu.com 或 https://baidu.com
+              请输入有效的网址，例如 stack021.com 或 https://stack021.com/
             </Text>
           ) : (
             <View style={styles.metaRow}>
@@ -129,7 +129,13 @@ export function WebViewSheet({ visible, onClose }: { visible: boolean; onClose: 
         </View>
 
         <View style={[styles.stage, { borderColor: colors.line, backgroundColor: colors.card }]}>
-          {visible ? <WebViewContainer key={`${url}#${reloads}`} url={url} /> : null}
+          {visible ? (
+            <WebViewContainer
+              key={`${url}#${reloads}`}
+              url={url}
+              onCloseRequest={onClose}
+            />
+          ) : null}
         </View>
 
         <Text

@@ -1,19 +1,63 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 import { RefreshIcon } from '@/components/Icons';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { APP_GREETING } from './messages';
+
+type WebViewBridgeMessage = {
+  type?: string;
+};
 
 /**
  * Native branch of the WebView container: a real `react-native-webview` (WKWebView / Android WebView).
  * The web branch lives in `WebViewContainer.web.tsx` and falls back to an iframe.
  */
-export function WebViewContainer({ url }: { url: string }) {
+export function WebViewContainer({
+  url,
+  onCloseRequest,
+}: {
+  url: string;
+  onCloseRequest?: () => void;
+}) {
   const { colors } = useTheme();
+  // v14's `WebView` defaults its generic to `undefined`, which collapses props to
+  // `never` once a ref is passed; `object` keeps WebViewProps intact.
+  const webRef = useRef<WebView<object>>(null);
+  const greetedRef = useRef(false);
   const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  function sendToWeb(payload: unknown) {
+    webRef.current?.injectJavaScript(
+      `window.__XU_WEBVIEW__ && typeof window.__XU_WEBVIEW__.receive === 'function' && window.__XU_WEBVIEW__.receive(${JSON.stringify(payload)}); true;`,
+    );
+  }
+
+  function greetWeb() {
+    if (greetedRef.current) return;
+    greetedRef.current = true;
+    sendToWeb({ type: 'message', text: APP_GREETING, sentAt: new Date().toISOString() });
+  }
+
+  function handleWebMessage(raw: string) {
+    let message: WebViewBridgeMessage | null = null;
+    try {
+      message = JSON.parse(raw) as WebViewBridgeMessage;
+    } catch {
+      return;
+    }
+    if (!message) return;
+    if (message.type === 'ready') {
+      greetWeb();
+      return;
+    }
+    if (message.type === 'close') {
+      onCloseRequest?.();
+    }
+  }
 
   if (error) {
     return (
@@ -39,6 +83,7 @@ export function WebViewContainer({ url }: { url: string }) {
 
   return (
     <WebView
+      ref={webRef}
       key={attempt}
       source={{ uri: url }}
       style={[styles.webview, { backgroundColor: colors.paper }]}
@@ -53,6 +98,7 @@ export function WebViewContainer({ url }: { url: string }) {
           <ActivityIndicator color={colors.muted} />
         </View>
       )}
+      onMessage={({ nativeEvent }) => handleWebMessage(nativeEvent.data)}
       onError={({ nativeEvent }) =>
         setError(nativeEvent.description || '加载失败，请检查网络或网址')
       }
