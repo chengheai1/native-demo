@@ -40,7 +40,9 @@
             "imageWidth": 108
           }
         }
-      ]
+      ],
+      "expo-font",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true,
