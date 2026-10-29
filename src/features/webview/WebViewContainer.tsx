@@ -1,0 +1,117 @@
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { WebView } from 'react-native-webview';
+
+import { RefreshIcon } from '@/components/Icons';
+import { Fonts, Radii, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+
+/**
+ * Native branch of the WebView container: a real `react-native-webview` (WKWebView / Android WebView).
+ * The web branch lives in `WebViewContainer.web.tsx` and falls back to an iframe.
+ */
+export function WebViewContainer({ url }: { url: string }) {
+  const { colors } = useTheme();
+  const [attempt, setAttempt] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  if (error) {
+    return (
+      <View style={[styles.error, { backgroundColor: colors.paper }]}>
+        <Text style={[styles.errorTitle, { color: colors.ink }]}>网页没有打开</Text>
+        <Text style={[styles.errorBody, { color: colors.muted }]}>{error}</Text>
+        <Text style={[styles.errorUrl, { color: colors.faint }]} numberOfLines={2}>
+          {url}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            setError(null);
+            setAttempt((value) => value + 1);
+          }}
+          style={[styles.retry, { backgroundColor: colors.ink }]}>
+          <RefreshIcon size={14} color={colors.paper} />
+          <Text style={[styles.retryText, { color: colors.paper }]}>重新加载</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <WebView
+      key={attempt}
+      source={{ uri: url }}
+      style={[styles.webview, { backgroundColor: colors.paper }]}
+      containerStyle={[styles.webview, { backgroundColor: colors.paper }]}
+      originWhitelist={['*']}
+      javaScriptEnabled
+      domStorageEnabled
+      allowsBackForwardNavigationGestures
+      startInLoadingState
+      renderLoading={() => (
+        <View style={[styles.loading, { backgroundColor: colors.paper }]}>
+          <ActivityIndicator color={colors.muted} />
+        </View>
+      )}
+      onError={({ nativeEvent }) =>
+        setError(nativeEvent.description || '加载失败，请检查网络或网址')
+      }
+      onHttpError={({ nativeEvent }) => setError(`服务器返回 HTTP ${nativeEvent.statusCode}`)}
+    />
+  );
+}
+
+const styles = StyleSheet.create({
+  webview: {
+    flex: 1,
+  },
+  loading: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  error: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl,
+  },
+  errorTitle: {
+    fontFamily: Fonts.display,
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  errorBody: {
+    marginTop: Spacing.sm,
+    maxWidth: 280,
+    textAlign: 'center',
+    fontFamily: Fonts.sans,
+    fontSize: 11,
+    lineHeight: 18,
+  },
+  errorUrl: {
+    marginTop: Spacing.xs,
+    maxWidth: 300,
+    textAlign: 'center',
+    fontFamily: Fonts.mono,
+    fontSize: 9,
+  },
+  retry: {
+    marginTop: Spacing.lg,
+    height: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    borderRadius: Radii.full,
+    paddingHorizontal: Spacing.lg,
+  },
+  retryText: {
+    fontFamily: Fonts.sans,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+});

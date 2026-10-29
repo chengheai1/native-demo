@@ -43,6 +43,7 @@ import {
 } from './mutations';
 import { ProfileSheet } from '@/features/profile/ProfileSheet';
 import { DebugPanel } from '@/features/debug/DebugPanel';
+import { WebViewSheet } from '@/features/webview/WebViewSheet';
 
 export function TodoScreen() {
   const { user, signOut } = useAuth();
@@ -54,9 +55,12 @@ export function TodoScreen() {
   const [editing, setEditing] = useState<Todo | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [webViewOpen, setWebViewOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [today, setToday] = useState(() => new Date());
   const composerRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const webViewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const webViewPending = useRef(false);
 
   const todosQuery = useQuery({
     queryKey: TODOS_KEY,
@@ -74,6 +78,29 @@ export function TodoScreen() {
     const timer = setInterval(() => setToday(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (webViewTimer.current) clearTimeout(webViewTimer.current);
+    };
+  }, []);
+
+  function openWebView() {
+    webViewPending.current = true;
+    setProfileOpen(false);
+  }
+
+  function handleProfileClosed() {
+    if (!webViewPending.current) return;
+    webViewPending.current = false;
+    if (webViewTimer.current) clearTimeout(webViewTimer.current);
+    // iOS presents only one modal at a time. The account sheet's native modal is
+    // fully dismissed by now; give UIKit a beat before presenting the next one.
+    webViewTimer.current = setTimeout(
+      () => setWebViewOpen(true),
+      Platform.OS === 'ios' ? 100 : 0,
+    );
+  }
 
   const todos = useMemo(() => todosQuery.data ?? [], [todosQuery.data]);
   const counts = useMemo(
@@ -356,10 +383,14 @@ export function TodoScreen() {
           setProfileOpen(false);
           setDebugOpen(true);
         }}
+        onOpenWebView={openWebView}
+        onClosed={handleProfileClosed}
         logoutPending={signingOut}
       />
 
       <DebugPanel visible={debugOpen} onClose={() => setDebugOpen(false)} />
+
+      <WebViewSheet visible={webViewOpen} onClose={() => setWebViewOpen(false)} />
     </AppScreen>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -29,16 +29,28 @@ type SheetProps = {
   onClose: () => void;
   title: string;
   description?: string;
+  /** Fired after the exit animation and the native modal has been removed. */
+  onClosed?: () => void;
   children: ReactNode;
 };
 
-export function Sheet({ visible, onClose, title, description, children }: SheetProps) {
+export function Sheet({ visible, onClose, title, description, onClosed, children }: SheetProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [mounted, setMounted] = useState(visible);
   const mountedRef = useRef(visible);
+  const onClosedRef = useRef(onClosed);
   const translateY = useSharedValue(1000);
+
+  useEffect(() => {
+    onClosedRef.current = onClosed;
+  }, [onClosed]);
+
+  const finishClose = useCallback(() => {
+    setMounted(false);
+    onClosedRef.current?.();
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -56,11 +68,11 @@ export function Sheet({ visible, onClose, title, description, children }: SheetP
       translateY.value = withTiming(1000, { duration: 220 }, (finished) => {
         if (finished) {
           mountedRef.current = false;
-          runOnJS(setMounted)(false);
+          runOnJS(finishClose)();
         }
       });
     }
-  }, [translateY, visible]);
+  }, [finishClose, translateY, visible]);
 
   const pan = Gesture.Pan()
     .onUpdate((event) => {

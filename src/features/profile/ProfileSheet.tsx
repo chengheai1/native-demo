@@ -2,7 +2,14 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 
 import { Avatar } from '@/components/Avatar';
 import { Sheet } from '@/components/Sheet';
-import { InfoIcon, LogoutIcon, MonitorIcon, MoonIcon, SunIcon } from '@/components/Icons';
+import {
+  GlobeIcon,
+  InfoIcon,
+  LogoutIcon,
+  MonitorIcon,
+  MoonIcon,
+  SunIcon,
+} from '@/components/Icons';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { User } from '@/api/types';
@@ -20,6 +27,8 @@ export function ProfileSheet({
   onClose,
   onLogout,
   onOpenDebug,
+  onOpenWebView,
+  onClosed,
   logoutPending,
 }: {
   user: User;
@@ -27,12 +36,19 @@ export function ProfileSheet({
   onClose: () => void;
   onLogout: () => void;
   onOpenDebug: () => void;
+  onOpenWebView: () => void;
+  onClosed?: () => void;
   logoutPending: boolean;
 }) {
   const { colors, mode, setMode } = useTheme();
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="账号" description="管理登录与调试信息">
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      onClosed={onClosed}
+      title="账号"
+      description="管理登录与调试信息">
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.line }]}>
         <Avatar user={user} size={60} />
         <View style={styles.identity}>
@@ -98,6 +114,14 @@ export function ProfileSheet({
           <InfoIcon size={18} color={colors.muted} />
           <Text style={[styles.rowText, { color: colors.ink }]}>调试信息</Text>
           <Text style={[styles.rowValue, { color: colors.faint }]}>视口 / API</Text>
+        </Pressable>
+        <Pressable
+          onPress={onOpenWebView}
+          accessibilityRole="button"
+          style={[styles.row, { backgroundColor: colors.card, borderColor: colors.line }]}>
+          <GlobeIcon size={18} color={colors.muted} />
+          <Text style={[styles.rowText, { color: colors.ink }]}>网页容器</Text>
+          <Text style={[styles.rowValue, { color: colors.faint }]}>WebView</Text>
         </Pressable>
       </View>
 

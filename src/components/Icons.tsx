@@ -157,6 +157,16 @@ export function MonitorIcon({ size = 20, color = 'currentColor', strokeWidth = 1
   );
 }
 
+export function GlobeIcon({ size = 20, color = 'currentColor', strokeWidth = 1.8 }: IconProps) {
+  return (
+    <Svg {...base(size, color, strokeWidth)}>
+      <Circle cx="12" cy="12" r="9" />
+      <Path d="M3 12h18" />
+      <Path d="M12 3c2.6 2.5 3.9 5.5 3.9 9s-1.3 6.5-3.9 9c-2.6-2.5-3.9-5.5-3.9-9S9.4 5.5 12 3Z" />
+    </Svg>
+  );
+}
+
 export function InfoIcon({ size = 20, color = 'currentColor', strokeWidth = 1.8 }: IconProps) {
   return (
     <Svg {...base(size, color, strokeWidth)}>
