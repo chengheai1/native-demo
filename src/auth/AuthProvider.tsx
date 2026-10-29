@@ -47,7 +47,7 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 }
 
 const AUTH_ERROR_COPY: Record<string, string> = {
-  google_not_configured: 'Google 登录尚未配置，请先使用演示登录。',
+  google_not_configured: 'Google 登录尚未配置，请稍后再试。',
   access_denied: '已取消 Google 登录。',
   state_mismatch: '登录链接已失效，请重新发起登录。',
   email_unverified: '邮箱尚未验证，请先在 Google 账号中完成验证。',

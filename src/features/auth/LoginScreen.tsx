@@ -15,12 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getAuthConfig } from '@/api/auth';
 import { AppScreen } from '@/components/AppScreen';
 import { BrandMark } from '@/components/BrandMark';
-import {
-  ArrowRightIcon,
-  GoogleIcon,
-  RefreshIcon,
-  SparkleIcon,
-} from '@/components/Icons';
+import { ArrowRightIcon, GoogleIcon, RefreshIcon } from '@/components/Icons';
 import { PressableScale } from '@/components/PressableScale';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { useAuth } from '@/auth/AuthProvider';
@@ -30,8 +25,8 @@ export function LoginScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { signInDemo, startGoogleSignIn, error: authError, clearError } = useAuth();
-  const [busy, setBusy] = useState<'demo' | 'google' | null>(null);
+  const { startGoogleSignIn, error: authError, clearError } = useAuth();
+  const [busy, setBusy] = useState<'google' | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const configQuery = useQuery({
@@ -43,23 +38,8 @@ export function LoginScreen() {
 
   const config = configQuery.data;
   const googleMissing = config?.google === false;
-  const demoDisabled = busy !== null || config?.demo === false;
   const error = localError ?? authError;
   const headlineSize = Math.min(50, Math.max(34, width * 0.108));
-
-  async function handleDemo() {
-    if (busy) return;
-    clearError();
-    setLocalError(null);
-    setBusy('demo');
-    try {
-      await signInDemo();
-    } catch (caught) {
-      setLocalError(caught instanceof Error ? caught.message : '演示登录失败，请重试');
-    } finally {
-      setBusy(null);
-    }
-  }
 
   async function handleGoogle() {
     if (busy) return;
@@ -182,30 +162,9 @@ export function LoginScreen() {
               </View>
             </PressableScale>
 
-            {config?.demo !== false ? (
-              <Pressable
-                onPress={handleDemo}
-                disabled={demoDisabled}
-                accessibilityRole="button"
-                accessibilityLabel="先看看演示"
-                style={[styles.demoButton, { opacity: demoDisabled ? 0.55 : 1 }]}>
-                <View style={[styles.demoIcon, { backgroundColor: colors.tabTrack }]}>
-                  {busy === 'demo' ? (
-                    <ActivityIndicator size="small" color={colors.ink} />
-                  ) : (
-                    <SparkleIcon size={16} color={colors.ink} />
-                  )}
-                </View>
-                <Text style={[styles.demoText, { color: colors.muted }]}>
-                  {busy === 'demo' ? '正在准备演示…' : '先看看演示'}
-                </Text>
-                <Text style={[styles.demoHint, { color: colors.faint }]}>无需账号</Text>
-              </Pressable>
-            ) : null}
-
             <Text style={[styles.privacy, { color: colors.faint }]}>
               {googleMissing
-                ? 'Google 登录待配置，演示模式可直接体验。'
+                ? 'Google 登录待配置，请完成配置后再试。'
                 : '登录仅读取你的姓名、邮箱和头像，用于同步待办。'}
             </Text>
           </Animated.View>
@@ -368,35 +327,9 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '500',
   },
-  demoButton: {
-    height: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    marginTop: 2,
-  },
-  demoIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  demoText: {
-    flex: 1,
-    fontFamily: Fonts.sans,
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  demoHint: {
-    fontFamily: Fonts.sans,
-    fontSize: 9,
-    letterSpacing: 0.4,
-  },
   privacy: {
     paddingHorizontal: 10,
-    paddingTop: 2,
+    paddingTop: 10,
     paddingBottom: 5,
     fontFamily: Fonts.sans,
     fontSize: 9,
