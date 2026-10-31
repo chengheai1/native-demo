@@ -9,8 +9,8 @@
 # 脚本只读取、不覆盖；首次部署需从 .env.example 复制并填好。
 #
 # 用法：
-#   ./deploy.sh                          # 发布当前工作区代码
-#   DEPLOY_HOST=1.2.3.4 ./deploy.sh      # 覆盖目标机
+#   DEPLOY_HOST=203.0.113.10 NETWORK=bridge ./deploy.sh  # 发布当前工作区代码
+#   PUBLIC_HEALTH=https://api.example.com/api/health ./deploy.sh  # 配置公网探活
 #   HEALTH_PROBE=false ./deploy.sh       # 演练：强制探活失败，验证自动回滚
 #   KEEP_IMAGES=5 ./deploy.sh            # 多保留几代镜像
 # ============================================================
@@ -18,18 +18,18 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ---------------- 可覆盖配置 ----------------
-DEPLOY_HOST="${DEPLOY_HOST:-203.0.113.10}"
+# ---------------- 部署配置（不在仓库中保存真实主机与网络） ----------------
+DEPLOY_HOST="${DEPLOY_HOST:-}"
 DEPLOY_USER="${DEPLOY_USER:-ubuntu}"
 SSH_OPTS="${SSH_OPTS:--o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
   -o ControlMaster=auto -o ControlPath=/tmp/ssh-xu-%r@%h-%p -o ControlPersist=60}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/xu-api}"
 CONTAINER="${CONTAINER:-xu-api}"
 IMAGE="${IMAGE:-xu-api}"
-NETWORK="${NETWORK:-bridge}"
+NETWORK="${NETWORK:-}"
 # 只绑回环，对外统一走宿主 nginx 反代
 HOST_PORT="${HOST_PORT:-127.0.0.1:8000}"
-PUBLIC_HEALTH="${PUBLIC_HEALTH:-https://app.api.stack021.com/api/health}"
+PUBLIC_HEALTH="${PUBLIC_HEALTH:-}"
 HEALTH_PROBE="${HEALTH_PROBE:-curl -fsS --max-time 3 http://127.0.0.1:8000/api/health}"
 KEEP_IMAGES="${KEEP_IMAGES:-3}"
 KEEP_DB_BACKUPS="${KEEP_DB_BACKUPS:-5}"
@@ -103,6 +103,8 @@ trap 'handle_error $?' ERR
 step "[1/7] 预检"
 command -v ssh   >/dev/null || die "本机缺少 ssh"
 command -v rsync >/dev/null || die "本机缺少 rsync"
+[ -n "$DEPLOY_HOST" ] || die "请通过 DEPLOY_HOST 指定部署主机"
+[ -n "$NETWORK" ] || die "请通过 NETWORK 指定 Docker 网络"
 [ -f "$HERE/app/main.py" ] || die "找不到 $HERE/app/main.py，请在 server/ 目录下运行"
 [ -f "$HERE/Dockerfile" ]  || die "找不到 $HERE/Dockerfile"
 
@@ -261,14 +263,16 @@ for old in $old_tags; do
 done
 [ -z "$old_tags" ] || info "已清理旧镜像：$(printf '%s ' $old_tags)"
 
-# 公网自检：反代/证书不由本脚本负责，失败只告警
-if pub="$(curl -fsS --max-time 10 "$PUBLIC_HEALTH" 2>/dev/null)"; then
-  case "$pub" in
-    *'"status":"ok"'*) info "公网 $PUBLIC_HEALTH 正常" ;;
-    *) warn "公网返回异常：$pub" ;;
-  esac
-else
-  warn "公网自检不通（nginx/证书/网络），请手动确认 $PUBLIC_HEALTH"
+# 公网自检：可选；反代/证书不由本脚本负责，失败只告警
+if [ -n "$PUBLIC_HEALTH" ]; then
+  if pub="$(curl -fsS --max-time 10 "$PUBLIC_HEALTH" 2>/dev/null)"; then
+    case "$pub" in
+      *'"status":"ok"'*) info "公网 $PUBLIC_HEALTH 正常" ;;
+      *) warn "公网返回异常：$pub" ;;
+    esac
+  else
+    warn "公网自检不通（nginx/证书/网络），请手动确认 $PUBLIC_HEALTH"
+  fi
 fi
 
 remote "docker ps --filter name='$CONTAINER' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'"

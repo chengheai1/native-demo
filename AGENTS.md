@@ -59,22 +59,22 @@ Run lint, typecheck, and `server/.venv/bin/pytest -q` before declaring a task do
 
 ## Deploying
 
-Production API: `https://app.api.stack021.com` — Cloudflare → host `nginx` → `xu-api` container on `bridge`.
+Production API architecture: Cloudflare → host nginx → `xu-api` Docker container. Keep real hosts and Docker networks out of the repository.
 
 ```bash
 cd server
-./deploy.sh
+DEPLOY_HOST=203.0.113.10 NETWORK=bridge PUBLIC_HEALTH=https://api.example.com/api/health ./deploy.sh
 ```
 
-What it does: rsync `app/` + build files to `ubuntu@203.0.113.10:/opt/xu-api` → `docker build` a timestamped image → stop the running container and rename it `xu-api-prev` → start the new one → poll `/api/health` → on success delete `xu-api-prev` and prune old images (last 3); on failure restore `xu-api-prev` automatically.
+What it does: rsync `app/` + build files to `/opt/xu-api` on `DEPLOY_HOST` → `docker build` a timestamped image → stop the running container and rename it `xu-api-prev` → start the new one → poll `/api/health` → on success delete `xu-api-prev` and prune old images (last 3); on failure restore `xu-api-prev` automatically.
 
 - Runtime secrets live only in `/opt/xu-api/run.env` (mode 600) on the server. The script reads it, never overwrites it, and derives it from the running container if it is missing. Never commit it or echo it.
 - A deploy ships the **working tree**, including uncommitted changes. Commit first; the script labels the image with the git revision (`-dirty` when the tree is dirty).
 - The script aborts if `MAIL_HOST` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_FROM` are missing — the login page only offers email codes, so production must be able to send them.
 - Before switching, it takes a code tarball and a SQLite snapshot into `/opt/xu-api/backups/` (keeps 5), and refuses to continue if the snapshot fails.
-- Manual rollback (the previous container is kept until the next successful deploy):
+- Manual rollback (the previous container is kept until the next successful deploy; replace the documentation IP with your host):
   `ssh ubuntu@203.0.113.10 'docker rm -f xu-api && docker rename xu-api-prev xu-api && docker start xu-api'`
-- The script does not touch nginx or TLS. The `app.api.stack021.com` server block and certificate live on the host's `nginx`; change those deliberately, not as part of an app deploy.
+- The script does not touch nginx or TLS. Configure the API server block and certificate on the host deliberately, not as part of an app deploy.
 - Never deploy dev settings (`ALLOW_DEMO_AUTH=true`, `COOKIE_SECURE=false`) to production.
 
 ## Navigation & Routing

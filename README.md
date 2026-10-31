@@ -125,7 +125,7 @@ Expo Go 联调：
 ### 配置 Brevo（免费 300 封/天）
 
 1. 注册 [Brevo](https://www.brevo.com/)，在 **Transactional email → SMTP & API → SMTP keys** 生成 SMTP key。
-2. 在 **Senders & IPs** 验证发件邮箱（推荐直接验证 `stack021.com` 域名，并配好 SPF/DKIM/DMARC，否则容易进垃圾箱）。
+2. 在 **Senders & IPs** 验证发件邮箱（推荐验证你自己的域名，并配好 SPF/DKIM/DMARC，否则容易进垃圾箱）。
 3. 写入 `server/.env.local`（`MAIL_HOST` 填了才算启用）：
 
    ```dotenv
@@ -269,20 +269,24 @@ docker compose up --build
 
 ## 部署（生产）
 
-线上 API：`https://app.api.stack021.com`（Cloudflare → 宿主 `nginx` → `xu-api` 容器）。
+生产架构示例：Cloudflare → 宿主 nginx → Docker 容器。真实主机、Docker 网络和公网健康检查地址通过环境变量传入，不写入仓库。
 
 ```bash
 cd server
+DEPLOY_HOST=203.0.113.10 \
+NETWORK=bridge \
+PUBLIC_HEALTH=https://api.example.com/api/health \
 ./deploy.sh
 ```
 
-脚本流程：本地 `app/` 与构建文件 rsync 到 `ubuntu@203.0.113.10:/opt/xu-api` → 服务器 `docker build` 打时间戳镜像 → 旧容器改名 `xu-api-prev` → 起新容器 → 轮询 `/api/health` → 成功则删旧容器、按时间戳标签保留最近 3 个镜像（手工标签如 `1.0` 不动）；失败自动把 `xu-api-prev` 换回来。
+脚本流程：本地 `app/` 与构建文件 rsync 到服务器 `/opt/xu-api` → 服务器 `docker build` 打时间戳镜像 → 旧容器改名 `xu-api-prev` → 起新容器 → 轮询 `/api/health` → 成功则删旧容器、按时间戳标签保留最近 3 个镜像（手工标签如 `1.0` 不动）；失败自动把 `xu-api-prev` 换回来。
 
+- `DEPLOY_HOST` 与 `NETWORK` 必填；`PUBLIC_HEALTH` 可选，不配置时跳过公网自检
 - 运行时配置（邮箱 SMTP、域名、`APP_ENV`）在服务器 `/opt/xu-api/run.env`（600），脚本只读不写；首次部署会生成模板并退出
 - 每次发布前把代码 tar 和 SQLite 快照放到 `/opt/xu-api/backups/`（保留 5 份），快照失败会中止发布
 - 发布的是**工作区代码**，包含未提交改动；建议先 commit
-- 脚本不碰 nginx / 证书，`app.api.stack021.com` 的 server 块在宿主 `nginx` 的 `prod.conf` 里
-- 手动回滚：
+- 脚本不碰 nginx / 证书，反向代理与 TLS 需要单独配置
+- 手动回滚（将主机名替换为你的服务器）：
 
 ```bash
 ssh ubuntu@203.0.113.10 'docker rm -f xu-api && docker rename xu-api-prev xu-api && docker start xu-api'
