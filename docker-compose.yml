@@ -14,9 +14,15 @@ services:
       # Enable for the local demo; disable for a public deployment.
       ALLOW_DEMO_AUTH: 'true'
       COOKIE_SECURE: 'false'
-      # Optional Google OAuth:
+      # Optional Google OAuth (backend only; the login page uses email codes):
       # GOOGLE_CLIENT_ID: ...
       # GOOGLE_CLIENT_SECRET: ...
+      # Email-code login (read from the shell or a local .env file):
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     volumes:
       - xu-data:/data
 

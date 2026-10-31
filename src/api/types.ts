@@ -18,6 +18,13 @@ export type Todo = {
 export type AuthConfig = {
   google: boolean;
   demo: boolean;
+  email: boolean;
+  emailDev: boolean;
+};
+
+export type EmailCodeSession = {
+  sent: boolean;
+  cooldownSeconds: number;
 };
 
 export type TodoFilter = 'all' | 'active' | 'done';

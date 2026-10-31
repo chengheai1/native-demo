@@ -1,12 +1,14 @@
 # 序 / XU
 
-用 **React Native + Expo** 写的手机端 Todo App：Google 登录、演示登录、任务清单、筛选、进度、乐观更新，以及一个轻量 FastAPI + SQLite 后端。
+用 **React Native + Expo** 写的手机端 Todo App：邮箱验证码登录、任务清单、筛选、进度、乐观更新，以及一个轻量 FastAPI + SQLite 后端。
 
 - 前端代码全部在 **`src/`**，使用现有 Expo SDK 58 / React Native 0.88 工程
 - 没有 `apps/web`；此前那版 Web 原型已移除
 - 后端移到根目录 **`server/`**
 
 > 截图来自 Expo Web 预览（同一套 React Native 组件）；iOS / Android 使用原生渲染与原生安全区、键盘行为。
+>
+> 登录页截图是加入邮箱登录之前的版本，当前登录页只保留邮箱验证码入口。
 
 ![登录页](docs/screenshots/login.png)
 ![清单页](docs/screenshots/todos.png)
@@ -39,6 +41,8 @@ cp .env.example .env
 
 `.env.example` 默认开启演示登录。健康检查：<http://localhost:8000/api/health>。
 
+邮箱验证码登录需要在 `server/.env.local` 配置 `MAIL_*`（见下文）。不配置也能本地联调：验证码会打印在 API 日志里。
+
 ### 2. 启动 App
 
 ```bash
@@ -57,9 +61,11 @@ EXPO_PUBLIC_API_URL=http://192.168.2.105:8000 npx expo start
 
 > 本机没有安装 Xcode / Android Emulator，因此没有实际启动原生模拟器；已通过 `npx expo export --platform ios` 和 `--platform android` 验证原生 bundle 能完整打包。请用 Expo Go 或 development build 体验。
 
-登录页点击「先看看演示」即可进入，预置 3 条任务。
+登录页输入邮箱、收取 6 位验证码即可进入；账号首次登录会自动创建，清单从空白开始。
 
-## Google 登录
+## Google 登录（后端保留，登录页未展示）
+
+> 登录页现在只提供邮箱验证码。Google OAuth 的后端接口、`AuthProvider` 方法和 `/web-auth` 回跳页仍然保留，需要恢复 Google 入口时可直接重新接入 `LoginScreen`；生产部署也不再强制要求 Google 凭据。
 
 > App 内 Google 登录通过原生 `WebBrowser` 打开系统授权页；Expo Web 预览额外提供了 `/web-auth` 回跳页，也可以在浏览器里完整测试 Google OAuth。生产环境推荐用 iOS / Android 的 development build。
 
@@ -97,7 +103,7 @@ EXPO_PUBLIC_API_URL=http://192.168.2.105:8000 npx expo start
    ALLOW_DEMO_AUTH=true
    ```
 
-4. 重启 API。`GET /api/auth/config` 的 `data` 应包含 `{"google": true, ...}`，登录页的 Google 按钮会从「待配置」变为可用。若仍为 `false`，点击按钮会直接提示 `.env` 未配置。
+4. 重启 API。`GET /api/auth/config` 的 `data.google` 应为 `true`；登录页目前不展示 Google 按钮，接口保留供以后恢复。
 
 Expo Go 联调：
 
@@ -110,11 +116,41 @@ Expo Go 联调：
 - 后端使用 **HTTPS**（Google 只接受 localhost 的 HTTP 回调）；可用 cloudflared / ngrok，把 `PUBLIC_BASE_URL` 改成隧道地址，并把对应 callback 加到 Google Console
 - App 设置 `EXPO_PUBLIC_API_URL=https://你的隧道地址`
 - 正式包用 **development build**（`npx expo run:ios` / `run:android` 或 EAS），确保 `nativedemo://auth` 自定义 scheme 能稳定返回 App
-- 如果后端只在局域网 HTTP 下运行，Google 登录会失败；此时请用演示登录
+- 如果后端只在局域网 HTTP 下运行，Google 登录会失败；此时用邮箱验证码登录
+
+## 邮箱验证码登录
+
+项目的默认登录方式：输入邮箱 → 收 6 位验证码 → 换 Bearer token（与历史 Google 账号共用 session 和账号）。
+
+### 配置 Brevo（免费 300 封/天）
+
+1. 注册 [Brevo](https://www.brevo.com/)，在 **Transactional email → SMTP & API → SMTP keys** 生成 SMTP key。
+2. 在 **Senders & IPs** 验证发件邮箱（推荐直接验证 `stack021.com` 域名，并配好 SPF/DKIM/DMARC，否则容易进垃圾箱）。
+3. 写入 `server/.env.local`（`MAIL_HOST` 填了才算启用）：
+
+   ```dotenv
+   MAIL_HOST=smtp-relay.brevo.com
+   MAIL_PORT=587
+   MAIL_USERNAME=你的 Brevo 登录邮箱
+   MAIL_PASSWORD=SMTP key
+   MAIL_FROM=已验证的发件邮箱
+   MAIL_FROM_NAME=序
+   ```
+
+4. 重启 API。`GET /api/auth/config` 的 `data.email` 变为 `true`，登录页出现邮箱输入框。
+
+本地开发不配置 `MAIL_*` 也能走完整流程：`APP_ENV=development` 时验证码会以 `[mail] dev mode, login code for ...` 打到 API 日志，登录页也会提示。
+
+### 安全与限流
+
+- 验证码 6 位数字，只存 SHA-256（`邮箱:验证码`）；10 分钟过期、单次使用、最多 5 次尝试
+- 同邮箱 60 秒冷却、每小时 5 次；同 IP 每小时 20 次
+- 生产环境未配置 SMTP 时 `/api/auth/email/code` 返回 503，登录页不展示邮箱表单
+- 邮箱账号与同邮箱的 Google 账号会自动合并
 
 ## 功能
 
-- Google 登录 / 演示登录 / 退出登录 / 重启后恢复会话
+- 邮箱验证码登录 / 退出登录 / 重启后恢复会话（Google OAuth 后端保留，登录页未展示）
 - 添加、编辑、完成；左滑展开「完成 / 撤销、删除」操作，当前行变灰，点击才执行；同时只允许一行展开；撤销删除、清除已完成
 - 全部 / 进行中 / 已完成筛选，支持点击和左右滑动切换；切换时自动收起已展开的操作；实时计数、完成进度
 - 乐观更新与失败回滚
@@ -185,12 +221,14 @@ JSON 接口统一返回 `{ "code": 200, "data": ..., "message": "success" }`；�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查 |
-| GET | `/api/auth/config` | Google / demo 是否可用 |
+| GET | `/api/auth/config` | Google / 邮箱 / demo 是否可用 |
 | GET | `/api/auth/google/native/start` | 原生 OAuth 起点 |
 | GET | `/api/auth/google/web/start` | Web 预览 OAuth 起点 |
 | GET | `/api/auth/google/callback` | Google 回调 |
 | POST | `/api/auth/native/exchange` | 一次性 code 换 token |
 | POST | `/api/auth/native/demo` | 演示账号 + token |
+| POST | `/api/auth/email/code` | 发送邮箱验证码 |
+| POST | `/api/auth/email/verify` | 邮箱验证码换 token |
 | GET | `/api/auth/me` | 当前用户 |
 | POST | `/api/auth/logout` | 注销当前 session |
 | GET / POST | `/api/todos` | 列表 / 创建 |
@@ -213,10 +251,10 @@ npx expo export --platform android --output-dir /tmp/xu-android
 
 # 后端
 cd server
-.venv/bin/pytest   # 21 tests
+.venv/bin/pytest   # 31 tests
 ```
 
-后端覆盖 OAuth state/回调、native/web code 交换、演示开关、会话过期、Todo CRUD、用户隔离、参数校验、Origin 校验。App 侧纯函数测试覆盖日期、姓名、相对时间和 Toast 标题截断。
+后端覆盖 OAuth state/回调、native/web code 交换、邮箱验证码（冷却/重试/过期/发送失败）、Google 与邮箱账号合并、users 表迁移、演示开关、会话过期、Todo CRUD、用户隔离、参数校验、Origin 校验。App 侧纯函数测试覆盖日期、姓名、相对时间和 Toast 标题截断。
 
 ## Docker
 
@@ -225,7 +263,7 @@ docker compose up --build
 # http://localhost:8000
 ```
 
-单容器只包含 FastAPI；SQLite 数据在 `xu-data` volume。Compose 为了本地演示开启 `ALLOW_DEMO_AUTH=true`。公开部署请关闭演示，并配置 Google 凭据与 HTTPS。
+单容器只包含 FastAPI；SQLite 数据在 `xu-data` volume。Compose 为了本地演示开启 `ALLOW_DEMO_AUTH=true`。公开部署请关闭演示，并配置 `MAIL_*` 与 HTTPS。
 
 > 这套 compose 只用于本地演示；生产发布走下一节的脚本（镜像在服务器上构建）。
 
@@ -240,7 +278,7 @@ cd server
 
 脚本流程：本地 `app/` 与构建文件 rsync 到 `ubuntu@203.0.113.10:/opt/xu-api` → 服务器 `docker build` 打时间戳镜像 → 旧容器改名 `xu-api-prev` → 起新容器 → 轮询 `/api/health` → 成功则删旧容器、按时间戳标签保留最近 3 个镜像（手工标签如 `1.0` 不动）；失败自动把 `xu-api-prev` 换回来。
 
-- 运行时配置（Google 凭据、域名、`APP_ENV`）在服务器 `/opt/xu-api/run.env`（600），脚本只读不写；首次部署会生成模板并退出
+- 运行时配置（邮箱 SMTP、域名、`APP_ENV`）在服务器 `/opt/xu-api/run.env`（600），脚本只读不写；首次部署会生成模板并退出
 - 每次发布前把代码 tar 和 SQLite 快照放到 `/opt/xu-api/backups/`（保留 5 份），快照失败会中止发布
 - 发布的是**工作区代码**，包含未提交改动；建议先 commit
 - 脚本不碰 nginx / 证书，`app.api.stack021.com` 的 server 块在宿主 `nginx` 的 `prod.conf` 里
@@ -285,7 +323,7 @@ src/
   lib/                 API 地址、存储、格式化、QueryClient
   constants/           颜色、字体、间距
 server/
-  app/                 FastAPI、SQLite、Google OAuth
+  app/                 FastAPI、SQLite、邮箱验证码 / Google OAuth
   tests/               pytest
   deploy.sh            生产发布脚本
   data/                SQLite 数据文件（本地开发）

@@ -14,9 +14,16 @@ import {
 } from 'react';
 import { Platform } from 'react-native';
 
-import { exchangeNativeCode, getMe, nativeDemo, logout } from '@/api/auth';
+import {
+  exchangeNativeCode,
+  getMe,
+  nativeDemo,
+  logout,
+  requestEmailCode as requestEmailCodeApi,
+  verifyEmailCode as verifyEmailCodeApi,
+} from '@/api/auth';
 import { ApiError, onUnauthorized, setApiToken } from '@/api/client';
-import type { User } from '@/api/types';
+import type { EmailCodeSession, User } from '@/api/types';
 import { API_URL } from '@/lib/api-url';
 import { clearSessionToken, readSessionToken, writeSessionToken } from '@/lib/storage';
 
@@ -29,6 +36,8 @@ type AuthContextValue = {
   error: string | null;
   signInDemo: () => Promise<void>;
   startGoogleSignIn: () => Promise<{ cancelled: boolean }>;
+  requestEmailCode: (email: string) => Promise<EmailCodeSession>;
+  signInWithEmailCode: (email: string, code: string) => Promise<void>;
   signOut: () => Promise<void>;
   retry: () => Promise<void>;
   clearError: () => void;
@@ -181,6 +190,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [applySession]);
 
+  const requestEmailCode = useCallback(async (email: string) => {
+    setError(null);
+    try {
+      return await requestEmailCodeApi(email);
+    } catch (caught) {
+      const message = errorMessage(caught);
+      setError(message);
+      throw new Error(message);
+    }
+  }, []);
+
+  const signInWithEmailCode = useCallback(
+    async (email: string, code: string) => {
+      setError(null);
+      try {
+        const session = await verifyEmailCodeApi(email, code);
+        await applySession(session.token, session.user);
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setError(message);
+        throw new Error(message);
+      }
+    },
+    [applySession],
+  );
+
   const signOut = useCallback(async () => {
     try {
       await logout();
@@ -204,6 +239,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       error,
       signInDemo,
       startGoogleSignIn,
+      requestEmailCode,
+      signInWithEmailCode,
       signOut,
       retry,
       clearError,
@@ -211,8 +248,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [
       clearError,
       error,
+      requestEmailCode,
       retry,
       signInDemo,
+      signInWithEmailCode,
       signOut,
       startGoogleSignIn,
       status,

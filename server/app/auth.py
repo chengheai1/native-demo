@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import re
 import secrets
 import sqlite3
 import uuid
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from . import mailer
 from .config import Settings
 from .db import iso, iso_in, transaction, utc_now
 from .deps import (
@@ -29,6 +33,10 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 STATE_COOKIE = "xu_oauth_state"
 STATE_TTL_SECONDS = 600
 LOGIN_CODE_TTL_SECONDS = 300
+EMAIL_CODE_LENGTH = 6
+EMAIL_CODE_HOURLY_LIMIT = 5
+EMAIL_IP_HOURLY_LIMIT = 20
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _hash_token(token: str) -> str:
@@ -67,6 +75,56 @@ def _create_login_code(conn: sqlite3.Connection, user_id: int) -> str:
         ),
     )
     return code
+
+
+def _normalize_email(value: str) -> str:
+    email = value.strip().lower()
+    if len(email) > 254 or not EMAIL_RE.fullmatch(email):
+        raise ApiError(400, "invalid_email", "请输入有效的邮箱地址")
+    return email
+
+
+def _email_code_hash(email: str, code: str) -> str:
+    return hashlib.sha256(f"{email}:{code}".encode("utf-8")).hexdigest()
+
+
+def _client_ip(request: Request) -> str:
+    # Cloudflare -> nginx -> container. Prefer Cloudflare's header; nginx appends
+    # the real peer to the right of X-Forwarded-For.
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    candidates = [
+        request.headers.get("cf-connecting-ip", ""),
+        forwarded_for.split(",")[-1] if forwarded_for else "",
+    ]
+    for candidate in candidates:
+        value = candidate.strip()
+        if value:
+            return value[:64]
+    return (request.client.host if request.client else "")[:64]
+
+
+def _upsert_email_user(conn: sqlite3.Connection, email: str) -> sqlite3.Row:
+    row = conn.execute(
+        "SELECT * FROM users WHERE email = ? COLLATE NOCASE ORDER BY id LIMIT 1",
+        (email,),
+    ).fetchone()
+    if row is not None:
+        return row
+
+    now = iso(utc_now())
+    name = email.split("@", 1)[0][:40] or "新用户"
+    cursor = conn.execute(
+        """
+        INSERT INTO users
+            (google_sub, email, name, picture_url, is_demo, created_at, updated_at)
+        VALUES (NULL, ?, ?, NULL, 0, ?, ?)
+        """,
+        (email, name, now, now),
+    )
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    if row is None:
+        raise ApiError(500, "user_upsert_failed", "无法创建账号")
+    return row
 
 
 def _set_session_cookie(response: Response, token: str, settings: Settings) -> None:
@@ -141,19 +199,50 @@ def _redirect_native_success(
 
 def _upsert_google_user(conn: sqlite3.Connection, user: GoogleUser) -> sqlite3.Row:
     now = iso(utc_now())
-    conn.execute(
-        """
-        INSERT INTO users (google_sub, email, name, picture_url, is_demo, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 0, ?, ?)
-        ON CONFLICT(google_sub) DO UPDATE SET
-            email = excluded.email,
-            name = excluded.name,
-            picture_url = excluded.picture_url,
-            updated_at = excluded.updated_at
-        """,
-        (user.sub, user.email, user.name, user.picture_url, now, now),
-    )
     row = conn.execute("SELECT * FROM users WHERE google_sub = ?", (user.sub,)).fetchone()
+
+    if row is None:
+        # Link to an account created through email-code login when the verified
+        # Google email matches and that account has no Google identity yet.
+        candidate = conn.execute(
+            "SELECT * FROM users WHERE email = ? COLLATE NOCASE ORDER BY id LIMIT 1",
+            (user.email,),
+        ).fetchone()
+        if candidate is not None and candidate["google_sub"] is None:
+            conn.execute(
+                """
+                UPDATE users
+                SET google_sub = ?, email = ?, name = ?, picture_url = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (user.sub, user.email, user.name, user.picture_url, now, candidate["id"]),
+            )
+            row = conn.execute(
+                "SELECT * FROM users WHERE id = ?", (candidate["id"],)
+            ).fetchone()
+        else:
+            cursor = conn.execute(
+                """
+                INSERT INTO users
+                    (google_sub, email, name, picture_url, is_demo, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 0, ?, ?)
+                """,
+                (user.sub, user.email, user.name, user.picture_url, now, now),
+            )
+            row = conn.execute(
+                "SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+    else:
+        conn.execute(
+            """
+            UPDATE users
+            SET email = ?, name = ?, picture_url = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (user.email, user.name, user.picture_url, now, row["id"]),
+        )
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (row["id"],)).fetchone()
+
     if row is None:
         raise ApiError(500, "user_upsert_failed", "无法创建账号")
     return row
@@ -237,12 +326,180 @@ def auth_config(settings: Settings = Depends(get_settings)) -> dict[str, bool]:
     return {
         "google": settings.google_configured,
         "demo": settings.allow_demo_auth,
+        "email": settings.email_login_enabled,
+        "emailDev": settings.email_login_dev_mode,
     }
 
 
 @router.get("/me")
 def me(user: sqlite3.Row = Depends(require_user)) -> dict[str, object]:
     return {"user": public_user(user)}
+
+
+class EmailCodeRequest(BaseModel):
+    email: str = Field(max_length=254)
+
+
+class EmailVerifyRequest(BaseModel):
+    email: str = Field(max_length=254)
+    code: str = Field(min_length=1, max_length=12)
+
+
+@router.post("/email/code")
+def request_email_code(
+    payload: EmailCodeRequest,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    db: sqlite3.Connection = Depends(get_db),
+) -> dict[str, object]:
+    if not settings.email_login_enabled:
+        raise ApiError(
+            503,
+            "email_login_unavailable",
+            "邮箱登录暂未开通，请使用其他方式登录",
+        )
+
+    email = _normalize_email(payload.email)
+    now = utc_now()
+    now_iso = iso(now)
+    cooldown_cutoff = iso(now - timedelta(seconds=settings.email_code_cooldown_seconds))
+    hour_cutoff = iso(now - timedelta(hours=1))
+    ip = _client_ip(request)
+
+    with transaction(db):
+        db.execute("DELETE FROM email_codes WHERE expires_at <= ?", (now_iso,))
+
+        latest = db.execute(
+            """
+            SELECT created_at FROM email_codes
+            WHERE email = ? COLLATE NOCASE
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (email,),
+        ).fetchone()
+        if latest is not None and latest["created_at"] > cooldown_cutoff:
+            raise ApiError(429, "email_code_cooldown", "验证码已发送，请稍后再试")
+
+        recent_for_email = db.execute(
+            """
+            SELECT COUNT(*) FROM email_codes
+            WHERE email = ? COLLATE NOCASE AND created_at > ?
+            """,
+            (email, hour_cutoff),
+        ).fetchone()[0]
+        if recent_for_email >= EMAIL_CODE_HOURLY_LIMIT:
+            raise ApiError(
+                429,
+                "email_code_rate_limited",
+                "该邮箱请求验证码过于频繁，请稍后再试",
+            )
+
+        if ip:
+            recent_for_ip = db.execute(
+                "SELECT COUNT(*) FROM email_codes WHERE ip = ? AND created_at > ?",
+                (ip, hour_cutoff),
+            ).fetchone()[0]
+            if recent_for_ip >= EMAIL_IP_HOURLY_LIMIT:
+                raise ApiError(
+                    429,
+                    "email_code_rate_limited",
+                    "请求验证码过于频繁，请稍后再试",
+                )
+
+        code = f"{secrets.randbelow(10**EMAIL_CODE_LENGTH):0{EMAIL_CODE_LENGTH}d}"
+        cursor = db.execute(
+            """
+            INSERT INTO email_codes
+                (email, code_hash, ip, attempts, created_at, expires_at, used_at)
+            VALUES (?, ?, ?, 0, ?, ?, NULL)
+            """,
+            (
+                email,
+                _email_code_hash(email, code),
+                ip or None,
+                now_iso,
+                iso(now + timedelta(seconds=settings.email_code_ttl_seconds)),
+            ),
+        )
+        code_id = int(cursor.lastrowid)
+
+    try:
+        mailer.send_login_code(settings, email, code)
+    except mailer.MailError:
+        with transaction(db):
+            db.execute("DELETE FROM email_codes WHERE id = ?", (code_id,))
+        raise ApiError(502, "email_send_failed", "验证码发送失败，请稍后重试")
+
+    return {"sent": True, "cooldownSeconds": settings.email_code_cooldown_seconds}
+
+
+@router.post("/email/verify")
+def verify_email_code(
+    payload: EmailVerifyRequest,
+    settings: Settings = Depends(get_settings),
+    db: sqlite3.Connection = Depends(get_db),
+) -> dict[str, object]:
+    if not settings.email_login_enabled:
+        raise ApiError(
+            503,
+            "email_login_unavailable",
+            "邮箱登录暂未开通，请使用其他方式登录",
+        )
+
+    email = _normalize_email(payload.email)
+    code = payload.code.strip()
+    if len(code) != EMAIL_CODE_LENGTH or not code.isdigit():
+        raise ApiError(400, "invalid_code", "请输入 6 位数字验证码")
+
+    now_iso = iso(utc_now())
+    failure: ApiError | None = None
+    user: sqlite3.Row | None = None
+    token: str | None = None
+
+    with transaction(db):
+        row = db.execute(
+            """
+            SELECT id, code_hash, attempts, expires_at
+            FROM email_codes
+            WHERE email = ? COLLATE NOCASE AND used_at IS NULL
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (email,),
+        ).fetchone()
+
+        if row is None or row["expires_at"] <= now_iso:
+            failure = ApiError(401, "invalid_code", "验证码已失效，请重新获取")
+        elif row["attempts"] >= settings.email_code_max_attempts:
+            failure = ApiError(429, "too_many_attempts", "尝试次数过多，请重新获取验证码")
+        elif not hmac.compare_digest(
+            str(row["code_hash"]), _email_code_hash(email, code)
+        ):
+            db.execute(
+                "UPDATE email_codes SET attempts = attempts + 1 WHERE id = ?",
+                (row["id"],),
+            )
+            failure = ApiError(401, "invalid_code", "验证码不正确")
+        else:
+            db.execute(
+                """
+                UPDATE email_codes SET used_at = ?
+                WHERE email = ? COLLATE NOCASE AND used_at IS NULL
+                """,
+                (now_iso, email),
+            )
+            db.execute("DELETE FROM email_codes WHERE expires_at <= ?", (now_iso,))
+            user = _upsert_email_user(db, email)
+            token = _create_session(db, int(user["id"]), settings)
+
+    if failure is not None:
+        raise failure
+    if user is None or token is None:
+        raise ApiError(500, "login_failed", "登录失败，请重试")
+
+    return {"token": token, "user": public_user(user)}
+
 
 
 @router.get("/google/start")

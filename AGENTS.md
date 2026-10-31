@@ -53,6 +53,7 @@ Run lint, typecheck, and `server/.venv/bin/pytest -q` before declaring a task do
 - SQLite path from `DATABASE_PATH`, default `server/data/app.db`; WAL mode; schema in `server/app/db.py` via `CREATE TABLE IF NOT EXISTS`. There is no migration framework, so schema edits must stay idempotent for existing databases.
 - Settings come from `server/.env` and `server/.env.local` (the latter wins) through `Settings.from_env()` in `server/app/config.py`.
 - Sessions store only SHA-256 hashes of bearer tokens; OAuth state and one-time login codes are hashed and time-boxed too. Don't log tokens.
+- Email-code login sends through `server/app/mailer.py`; `MAIL_*` comes from `server/.env`/`.env.local`. Without `MAIL_HOST`, development logs the code instead of sending and production disables the endpoint. Never return the code in an API response.
 - Timestamps are ISO-8601 UTC strings (`db.iso()`).
 - pytest fixtures build a throwaway database (`server/tests/conftest.py`) — tests must never touch `server/data/app.db`.
 
@@ -69,7 +70,7 @@ What it does: rsync `app/` + build files to `ubuntu@203.0.113.10:/opt/xu-api` �
 
 - Runtime secrets live only in `/opt/xu-api/run.env` (mode 600) on the server. The script reads it, never overwrites it, and derives it from the running container if it is missing. Never commit it or echo it.
 - A deploy ships the **working tree**, including uncommitted changes. Commit first; the script labels the image with the git revision (`-dirty` when the tree is dirty).
-- The script aborts if `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are missing — production has demo login disabled, so they are required.
+- The script aborts if `MAIL_HOST` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_FROM` are missing — the login page only offers email codes, so production must be able to send them.
 - Before switching, it takes a code tarball and a SQLite snapshot into `/opt/xu-api/backups/` (keeps 5), and refuses to continue if the snapshot fails.
 - Manual rollback (the previous container is kept until the next successful deploy):
   `ssh ubuntu@203.0.113.10 'docker rm -f xu-api && docker rename xu-api-prev xu-api && docker start xu-api'`

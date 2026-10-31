@@ -31,6 +31,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Google OAuth is disabled: set GOOGLE_CLIENT_ID and "
                 "GOOGLE_CLIENT_SECRET in server/.env, then restart."
             )
+        if not settings.mail_configured:
+            if settings.is_production:
+                logger.warning(
+                    "Email login is disabled: set MAIL_HOST, MAIL_USERNAME, "
+                    "MAIL_PASSWORD and MAIL_FROM in the runtime environment."
+                )
+            else:
+                logger.warning(
+                    "Email login runs in dev mode: verification codes are written "
+                    "to this log instead of being sent."
+                )
         yield
 
     app = FastAPI(

@@ -21,7 +21,7 @@ def test_success_responses_use_standard_envelope(client: TestClient) -> None:
     assert health.headers["content-length"] == str(len(health.content))
     assert client.get("/api/auth/config").json() == {
         "code": 200,
-        "data": {"google": True, "demo": True},
+        "data": {"google": True, "demo": True, "email": True, "emailDev": True},
         "message": "success",
     }
 
@@ -38,7 +38,12 @@ def test_error_responses_use_standard_envelope(client: TestClient) -> None:
 
 def test_health_and_config(client: TestClient) -> None:
     assert client.get("/api/health").json()["data"] == {"status": "ok"}
-    assert client.get("/api/auth/config").json()["data"] == {"google": True, "demo": True}
+    assert client.get("/api/auth/config").json()["data"] == {
+        "google": True,
+        "demo": True,
+        "email": True,
+        "emailDev": True,
+    }
 
 
 def test_me_requires_session(client: TestClient) -> None:

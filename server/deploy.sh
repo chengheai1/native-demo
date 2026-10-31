@@ -5,7 +5,7 @@
 #   本地 server/ 源码 → rsync 到服务器 → 服务器 docker build →
 #   旧容器改名保留 → 启动新容器 → 探活 → 成功则清理 / 失败自动回滚
 #
-# 服务器上的运行时配置（Google 凭据、域名等）在 /opt/xu-api/run.env，
+# 服务器上的运行时配置（邮箱 SMTP、域名等）在 /opt/xu-api/run.env，
 # 脚本只读取、不覆盖；首次部署需从 .env.example 复制并填好。
 #
 # 用法：
@@ -144,22 +144,24 @@ if [ ! -f run.env ]; then
     echo "CREATED"
   fi
 fi
-grep -q '^GOOGLE_CLIENT_ID=.\{1,\}'     run.env || echo MISSING_GOOGLE_ID
-grep -q '^GOOGLE_CLIENT_SECRET=.\{1,\}' run.env || echo MISSING_GOOGLE_SECRET
-grep -q '^APP_ENV=production'           run.env || echo NOT_PRODUCTION
+grep -q '^MAIL_HOST=.\{1,\}'     run.env || echo MISSING_MAIL_HOST
+grep -q '^MAIL_USERNAME=.\{1,\}' run.env || echo MISSING_MAIL_USERNAME
+grep -q '^MAIL_PASSWORD=.\{1,\}' run.env || echo MISSING_MAIL_PASSWORD
+grep -q '^MAIL_FROM=.\{1,\}'     run.env || echo MISSING_MAIL_FROM
+grep -q '^APP_ENV=production'    run.env || echo NOT_PRODUCTION
 REMOTE
 )"
 
 case "$env_state" in
   *CREATED*)
     die "首次部署：已在服务器生成 $REMOTE_DIR/run.env（模板）。
-   请填好 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / PUBLIC_BASE_URL 等后重跑：
+   请填好 MAIL_HOST / MAIL_USERNAME / MAIL_PASSWORD / MAIL_FROM / PUBLIC_BASE_URL 等后重跑：
      ssh $TARGET 'vi $REMOTE_DIR/run.env'" ;;
 esac
 case "$env_state" in
   *DERIVED*) info "run.env 已从运行中的容器导出" ;;
-  *MISSING_GOOGLE_ID*|*MISSING_GOOGLE_SECRET*)
-    die "$REMOTE_DIR/run.env 缺少 Google 凭据；生产环境关闭了演示登录，必须配置" ;;
+  *MISSING_MAIL_*)
+    die "$REMOTE_DIR/run.env 缺少邮箱 SMTP 配置；登录页现在只支持邮箱验证码，发不出信就没人能登录" ;;
 esac
 case "$env_state" in
   *NOT_PRODUCTION*) warn "run.env 中 APP_ENV 不是 production，线上文档与 CORS 行为会不同" ;;

@@ -3,9 +3,11 @@ const { defineConfig } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
 
 module.exports = defineConfig([
+  {
+    ignores: ['dist/**', '.expo/**', '.kimi-tmp/**', '.tmp/**'],
+  },
   expoConfig,
   {
-    ignores: ['dist/*'],
     rules: {
       // Reanimated shared values are intentionally mutable worklet state.
       'react-hooks/immutability': 'off',

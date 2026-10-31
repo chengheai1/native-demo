@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -15,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getAuthConfig } from '@/api/auth';
 import { AppScreen } from '@/components/AppScreen';
 import { BrandMark } from '@/components/BrandMark';
-import { ArrowRightIcon, GoogleIcon, RefreshIcon } from '@/components/Icons';
+import { RefreshIcon } from '@/components/Icons';
 import { PressableScale } from '@/components/PressableScale';
 import { Fonts, Radii, Spacing } from '@/constants/theme';
 import { useAuth } from '@/auth/AuthProvider';
@@ -25,9 +26,13 @@ export function LoginScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { startGoogleSignIn, error: authError, clearError } = useAuth();
-  const [busy, setBusy] = useState<'google' | null>(null);
+  const { requestEmailCode, signInWithEmailCode, error: authError, clearError } = useAuth();
   const [localError, setLocalError] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  const [emailBusy, setEmailBusy] = useState<'send' | 'verify' | null>(null);
+  const [cooldown, setCooldown] = useState(0);
 
   const configQuery = useQuery({
     queryKey: ['auth-config'],
@@ -37,27 +42,55 @@ export function LoginScreen() {
   });
 
   const config = configQuery.data;
-  const googleMissing = config?.google === false;
+  const emailEnabled = config?.email === true;
+  const emailDev = config?.emailDev === true;
   const error = localError ?? authError;
   const headlineSize = Math.min(50, Math.max(34, width * 0.108));
 
-  async function handleGoogle() {
-    if (busy) return;
-    if (googleMissing) {
-      setLocalError(
-        'Google 登录尚未配置：请在 server/.env 填写 GOOGLE_CLIENT_ID 和 GOOGLE_CLIENT_SECRET，重启 API 后再试。',
-      );
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  async function handleSendCode() {
+    if (emailBusy || cooldown > 0) return;
+    const value = email.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+      setLocalError('请输入有效的邮箱地址');
       return;
     }
     clearError();
     setLocalError(null);
-    setBusy('google');
+    setEmailBusy('send');
     try {
-      await startGoogleSignIn();
+      const result = await requestEmailCode(value);
+      setEmail(value.toLowerCase());
+      setCode('');
+      setCodeSent(true);
+      setCooldown(result.cooldownSeconds ?? 60);
     } catch (caught) {
-      setLocalError(caught instanceof Error ? caught.message : 'Google 登录失败，请重试');
+      setLocalError(caught instanceof Error ? caught.message : '验证码发送失败，请重试');
     } finally {
-      setBusy(null);
+      setEmailBusy(null);
+    }
+  }
+
+  async function handleVerify() {
+    if (emailBusy) return;
+    if (!/^\d{6}$/.test(code.trim())) {
+      setLocalError('请输入 6 位数字验证码');
+      return;
+    }
+    clearError();
+    setLocalError(null);
+    setEmailBusy('verify');
+    try {
+      await signInWithEmailCode(email, code.trim());
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : '登录失败，请重试');
+    } finally {
+      setEmailBusy(null);
     }
   }
 
@@ -132,40 +165,144 @@ export function LoginScreen() {
               </Pressable>
             ) : null}
 
-            <PressableScale
-              onPress={handleGoogle}
-              disabled={busy !== null}
-              accessibilityLabel="使用 Google 继续"
-              style={styles.fullWidth}>
-              <View
-                style={[
-                  styles.googleButton,
-                  {
-                    backgroundColor: colors.paper,
-                    borderColor: colors.line,
-                    opacity: googleMissing ? 0.78 : 1,
-                  },
-                ]}>
-                <View style={[styles.googleIcon, { backgroundColor: colors.white }]}>
-                  <GoogleIcon size={20} />
-                </View>
-                <Text style={[styles.googleText, { color: colors.ink }]}>使用 Google 继续</Text>
-                {busy === 'google' ? (
-                  <ActivityIndicator size="small" color={colors.muted} />
-                ) : googleMissing ? (
-                  <View style={[styles.pendingChip, { backgroundColor: colors.tabTrack }]}>
-                    <Text style={[styles.pendingText, { color: colors.faint }]}>待配置</Text>
-                  </View>
-                ) : (
-                  <ArrowRightIcon size={17} color={colors.muted} />
-                )}
+            {configQuery.isPending ? (
+              <View style={styles.emailLoading}>
+                <ActivityIndicator size="small" color={colors.muted} />
               </View>
-            </PressableScale>
+            ) : emailEnabled ? (
+              <View style={styles.emailForm}>
+                <Text style={[styles.emailTitle, { color: colors.muted }]}>邮箱验证码登录</Text>
+                {codeSent ? (
+                  <>
+                    <Text style={[styles.emailHint, { color: colors.muted }]}>
+                      验证码已发送至 {email}
+                    </Text>
+                    <TextInput
+                      value={code}
+                      onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
+                      onSubmitEditing={() => void handleVerify()}
+                      placeholder="6 位验证码"
+                      placeholderTextColor={colors.faint}
+                      keyboardType="number-pad"
+                      textContentType="oneTimeCode"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      editable={emailBusy === null}
+                      returnKeyType="go"
+                      accessibilityLabel="邮箱验证码"
+                      style={[
+                        styles.emailInput,
+                        {
+                          color: colors.ink,
+                          borderColor: colors.line,
+                          backgroundColor: colors.paper,
+                        },
+                      ]}
+                    />
+                    <PressableScale
+                      onPress={handleVerify}
+                      disabled={emailBusy !== null}
+                      accessibilityLabel="使用验证码登录"
+                      style={styles.fullWidth}>
+                      <View style={[styles.emailButton, { backgroundColor: colors.ink }]}>
+                        {emailBusy === 'verify' ? (
+                          <ActivityIndicator size="small" color={colors.paper} />
+                        ) : (
+                          <Text style={[styles.emailButtonText, { color: colors.paper }]}>
+                            登录
+                          </Text>
+                        )}
+                      </View>
+                    </PressableScale>
+                    <View style={styles.emailActions}>
+                      <Pressable
+                        onPress={() => void handleSendCode()}
+                        disabled={cooldown > 0 || emailBusy !== null}
+                        hitSlop={8}>
+                        <Text
+                          style={[
+                            styles.emailAction,
+                            { color: cooldown > 0 ? colors.faint : colors.muted },
+                          ]}>
+                          {cooldown > 0 ? `${cooldown}s 后可重新发送` : '重新发送验证码'}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => {
+                          setCodeSent(false);
+                          setCode('');
+                          setCooldown(0);
+                          setLocalError(null);
+                        }}
+                        hitSlop={8}>
+                        <Text style={[styles.emailAction, { color: colors.muted }]}>
+                          换个邮箱
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <TextInput
+                      value={email}
+                      onChangeText={setEmail}
+                      onSubmitEditing={() => void handleSendCode()}
+                      placeholder="邮箱地址"
+                      placeholderTextColor={colors.faint}
+                      keyboardType="email-address"
+                      textContentType="emailAddress"
+                      autoComplete="email"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={emailBusy === null}
+                      returnKeyType="send"
+                      accessibilityLabel="邮箱地址"
+                      style={[
+                        styles.emailInput,
+                        {
+                          color: colors.ink,
+                          borderColor: colors.line,
+                          backgroundColor: colors.paper,
+                        },
+                      ]}
+                    />
+                    <PressableScale
+                      onPress={handleSendCode}
+                      disabled={emailBusy !== null}
+                      accessibilityLabel="发送验证码"
+                      style={styles.fullWidth}>
+                      <View style={[styles.emailButton, { backgroundColor: colors.ink }]}>
+                        {emailBusy === 'send' ? (
+                          <ActivityIndicator size="small" color={colors.paper} />
+                        ) : (
+                          <Text style={[styles.emailButtonText, { color: colors.paper }]}>
+                            发送验证码
+                          </Text>
+                        )}
+                      </View>
+                    </PressableScale>
+                  </>
+                )}
+                {emailDev ? (
+                  <Text style={[styles.emailHint, { color: colors.faint }]}>
+                    开发模式：验证码会打印在 API 日志中。
+                  </Text>
+                ) : null}
+              </View>
+            ) : configQuery.isError ? null : (
+              <View style={[styles.emailUnavailable, { borderColor: colors.line }]}>
+                <Text style={[styles.emailUnavailableText, { color: colors.muted }]}>
+                  邮箱登录暂未配置，请稍后再试。
+                </Text>
+              </View>
+            )}
 
             <Text style={[styles.privacy, { color: colors.faint }]}>
-              {googleMissing
-                ? 'Google 登录待配置，请完成配置后再试。'
-                : '登录仅读取你的姓名、邮箱和头像，用于同步待办。'}
+              {emailEnabled
+                ? '邮箱仅用于接收一次性验证码；验证后会自动创建或关联你的账号。'
+                : configQuery.isError
+                  ? '连接不上服务器，请检查网络后重试。'
+                  : '登录服务尚未配置，请联系管理员。'}
             </Text>
           </Animated.View>
 
@@ -290,42 +427,73 @@ const styles = StyleSheet.create({
   fullWidth: {
     width: '100%',
   },
-  googleButton: {
-    height: 58,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 21,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.lg,
+  emailForm: {
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 2,
+    gap: 8,
   },
-  googleIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  emailTitle: {
+    paddingHorizontal: 4,
+    paddingBottom: 2,
+    fontFamily: Fonts.sans,
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 1.2,
+  },
+  emailLoading: {
+    height: 112,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
   },
-  googleText: {
-    flex: 1,
+  emailUnavailable: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.lg,
+    margin: 10,
+  },
+  emailUnavailableText: {
+    fontFamily: Fonts.sans,
+    fontSize: 11,
+    lineHeight: 17,
+    textAlign: 'center',
+  },
+  emailInput: {
+    height: 52,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    paddingHorizontal: Spacing.lg,
+    fontFamily: Fonts.sans,
+    fontSize: 14,
+  },
+  emailButton: {
+    height: 52,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emailButtonText: {
     fontFamily: Fonts.sans,
     fontSize: 14,
     fontWeight: '600',
   },
-  pendingChip: {
-    borderRadius: Radii.full,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  pendingText: {
+  emailHint: {
+    paddingHorizontal: 4,
     fontFamily: Fonts.sans,
     fontSize: 9,
-    fontWeight: '500',
+    lineHeight: 15,
+  },
+  emailActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingTop: 2,
+  },
+  emailAction: {
+    fontFamily: Fonts.sans,
+    fontSize: 9,
   },
   privacy: {
     paddingHorizontal: 10,

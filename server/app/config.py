@@ -40,6 +40,18 @@ class Settings:
     frontend_origin: str = "http://localhost:8081"
     google_client_id: str = ""
     google_client_secret: str = ""
+    # Outgoing mail (Brevo SMTP by default: smtp-relay.brevo.com:587).
+    mail_host: str = ""
+    mail_port: int = 587
+    mail_username: str = ""
+    mail_password: str = ""
+    mail_from: str = ""
+    mail_from_name: str = "序"
+    mail_starttls: bool = True
+    mail_ssl: bool = False
+    email_code_ttl_seconds: int = 600
+    email_code_cooldown_seconds: int = 60
+    email_code_max_attempts: int = 5
     allow_demo_auth: bool = True
     session_days: int = 30
     cookie_secure: bool = False
@@ -54,6 +66,19 @@ class Settings:
     @property
     def google_configured(self) -> bool:
         return bool(self.google_client_id.strip() and self.google_client_secret.strip())
+
+    @property
+    def mail_configured(self) -> bool:
+        return bool(self.mail_host.strip() and self.mail_from.strip())
+
+    @property
+    def email_login_enabled(self) -> bool:
+        # Development can run without SMTP credentials: the code is logged instead.
+        return self.mail_configured or not self.is_production
+
+    @property
+    def email_login_dev_mode(self) -> bool:
+        return not self.mail_configured and not self.is_production
 
     @property
     def redirect_uri(self) -> str:
@@ -108,6 +133,19 @@ class Settings:
             frontend_origin=os.getenv("FRONTEND_ORIGIN", "http://localhost:8081"),
             google_client_id=os.getenv("GOOGLE_CLIENT_ID", ""),
             google_client_secret=os.getenv("GOOGLE_CLIENT_SECRET", ""),
+            mail_host=os.getenv("MAIL_HOST", ""),
+            mail_port=int(os.getenv("MAIL_PORT", "587")),
+            mail_username=os.getenv("MAIL_USERNAME", ""),
+            mail_password=os.getenv("MAIL_PASSWORD", ""),
+            mail_from=os.getenv("MAIL_FROM", ""),
+            mail_from_name=os.getenv("MAIL_FROM_NAME", "序"),
+            mail_starttls=_as_bool(os.getenv("MAIL_STARTTLS"), default=True),
+            mail_ssl=_as_bool(os.getenv("MAIL_SSL"), default=False),
+            email_code_ttl_seconds=int(os.getenv("EMAIL_CODE_TTL_SECONDS", "600")),
+            email_code_cooldown_seconds=int(
+                os.getenv("EMAIL_CODE_COOLDOWN_SECONDS", "60")
+            ),
+            email_code_max_attempts=int(os.getenv("EMAIL_CODE_MAX_ATTEMPTS", "5")),
             allow_demo_auth=_as_bool(
                 os.getenv("ALLOW_DEMO_AUTH"),
                 default=app_env.lower() not in {"production", "prod"},
